@@ -51,7 +51,9 @@ import {
   MinusCircle,
   Search,
   Minus,
-  Plus
+  Plus,
+  Bell,
+  Globe // Novo ícone para Internet
 } from 'lucide-react';
 
 // --- CONFIGURAÇÃO DO FIREBASE ---
@@ -69,6 +71,10 @@ const ADMIN_EMAILS = ['santoslorrany250@gmail.com'];
 const FINE_PRICE_PLAYER = 5.00; 
 const FINE_PRICE_OWNER = 4.00; 
 
+// --- REGRAS DE BANIMENTO (VIDAS) ---
+const BAN_THRESHOLD_OWNER = 3;
+const BAN_THRESHOLD_PLAYER = 1;
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -79,6 +85,14 @@ const getCollectionPath = (colName) => `artifacts/${appId}/public/data/${colName
 const AVATARS = ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🐔','🐧','🐦','🐤','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦟','🦗','🕷','🕸','🦂','🐢','🐍','🦎','🦖','🦕','🐙','🦑','🦐','🦞','🦀','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🐊','🐅','🐆','🦓','🦍','🦧','🦣','🐘','🦛','🦏','🐪','🐫','🦒','🦘','🦬','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🐐','🦌','🐕','🐩','🦮','🐕‍🦺','🐈','🐈‍⬛','🐓','🦃','🦚','🦜','🦢','🦩','🕊','🐇','🦝','🦨','🦡','🦦','🦥','🐁','🐀','🐿','🦔','🐾','🐉','🐲','🌵','🎄','🌲','🌳','🌴','🌱','🌿','☘️','🍀','🎍','🪴','🎋','🍃','🍂','🍁','🍄','🐚','🪨','🌾','💐','🌷','🌹','🥀','🌺','🌸','🌼','🌻','🌞','🌝','🌛','🌜','🌚','🌕','🌖','🌗','🌘','🌑','🌒','🌓','🌔','🌙','🌎','🌍','🌏','🪐','💫','⭐️','🌟','✨','⚡️','☄️','💥','🔥','🌪','🌈','☀️','🌤','⛅️','🌥','☁️','🌦','🌧','⛈','🌩','🌨','❄️','☃️','⛄️','🌬','💨','💧','💦','☔️','☂️','🌊','🌫'];
 
 const getRandomAvatar = () => AVATARS[Math.floor(Math.random() * AVATARS.length)];
+
+// --- FUNÇÃO AUXILIAR DE BANIMENTO ---
+const isPlayerBanned = (user) => {
+    if (!user) return false;
+    const fines = user.fines || 0;
+    const threshold = user.isOwner ? BAN_THRESHOLD_OWNER : BAN_THRESHOLD_PLAYER;
+    return fines >= threshold;
+};
 
 const resizeImage = (file) => {
   return new Promise((resolve) => {
@@ -123,11 +137,16 @@ const dateFilters = {
 // --- COMPONENTES ---
 
 const AvatarDisplay = ({ avatar, size = "md", className = "" }) => {
-    const isImage = avatar && avatar.startsWith('data:image');
+    // Aceita data:image (upload) OU http (link da internet)
+    const isImage = avatar && (avatar.startsWith('data:image') || avatar.startsWith('http'));
     const sizeClasses = { sm: "w-8 h-8 text-lg", md: "w-12 h-12 text-2xl", lg: "w-16 h-16 text-4xl", xl: "w-24 h-24 text-6xl" };
     return (
         <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center overflow-hidden bg-slate-700 border border-slate-600 ${className}`}>
-            {isImage ? <img src={avatar} alt="Av" className="w-full h-full object-cover" /> : <span role="img">{avatar || '👤'}</span>}
+            {isImage ? (
+                <img src={avatar} alt="Av" className="w-full h-full object-cover" onError={(e) => {e.target.style.display='none'; e.target.parentNode.innerHTML='❌'}} />
+            ) : (
+                <span role="img">{avatar || '👤'}</span>
+            )}
         </div>
     );
 };
@@ -152,10 +171,9 @@ const UserSelectModal = ({ users, onClose, onSelect }) => {
             avatar: getRandomAvatar(),
             createdAt: serverTimestamp()
         };
-        
         try {
             await setDoc(doc(db, getCollectionPath('users'), fakeUid), newUser);
-            onSelect(newUser); // Seleciona o usuário recém-criado
+            onSelect(newUser); 
         } catch (e) {
             alert("Erro ao criar: " + e.message);
         }
@@ -189,7 +207,10 @@ const UserSelectModal = ({ users, onClose, onSelect }) => {
                         >
                             <AvatarDisplay avatar={u.avatar} size="sm" />
                             <div>
-                                <span className="block font-bold text-white">{u.displayName}</span>
+                                <div className="flex items-center gap-2">
+                                    <span className="block font-bold text-white">{u.displayName}</span>
+                                    {isPlayerBanned(u) && <span className="text-[8px] bg-red-600 px-1 rounded">BANIDO</span>}
+                                </div>
                                 <span className="text-[10px] text-slate-400">{u.isOwner ? 'Dono' : (u.isOffline ? 'Sem Conta' : 'Jogador')}</span>
                             </div>
                         </button>
@@ -297,6 +318,7 @@ const ProfileModal = ({ user, userDoc, onClose }) => {
     const [name, setName] = useState(userDoc?.displayName || '');
     const [avatar, setAvatar] = useState(userDoc?.avatar || '👤');
     const [loading, setLoading] = useState(false);
+    const [showUrlInput, setShowUrlInput] = useState(false); // Estado para mostrar input de link
     const fileInputRef = useRef(null);
 
     const handleImageUpload = async (e) => {
@@ -322,11 +344,23 @@ const ProfileModal = ({ user, userDoc, onClose }) => {
                 <h2 className="text-xl font-bold text-white mb-4 text-center">Editar Perfil</h2>
                 <div className="flex flex-col items-center mb-6 gap-4">
                     <AvatarDisplay avatar={avatar} size="xl" className="border-4 border-slate-600 shadow-lg" />
+                    
                     <div className="flex gap-2">
                         <button onClick={() => setAvatar(getRandomAvatar())} className="bg-slate-700 text-white px-3 py-2 rounded-lg text-xs flex items-center gap-2 hover:bg-slate-600"><RefreshCw className="w-3 h-3" /> Emoji</button>
                         <button onClick={() => fileInputRef.current.click()} className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs flex items-center gap-2 hover:bg-emerald-500"><Camera className="w-3 h-3" /> Foto</button>
+                        <button onClick={() => setShowUrlInput(!showUrlInput)} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs flex items-center gap-2 hover:bg-blue-500"><Globe className="w-3 h-3" /> Link</button>
                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                     </div>
+
+                    {/* Input para URL de Imagem da Internet */}
+                    {showUrlInput && (
+                        <input 
+                            type="text" 
+                            placeholder="Cole o link da imagem (https://...)" 
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white"
+                            onChange={(e) => setAvatar(e.target.value)}
+                        />
+                    )}
                 </div>
                 <div className="space-y-4">
                     <div><label className="text-xs font-bold text-slate-400">SEU NOME</label><input className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white mt-1 focus:border-emerald-500 outline-none" value={name} onChange={e => setName(e.target.value)} /></div>
@@ -338,11 +372,10 @@ const ProfileModal = ({ user, userDoc, onClose }) => {
     );
 };
 
-// --- MODAL DE TRANSAÇÃO (ATUALIZADO COM DECREMENTO DE INFRAÇÕES) ---
 const TransactionModal = ({ user, action, onClose }) => {
     const [amount, setAmount] = useState('');
     const [description, setDescription] = useState('');
-    const [finesToClear, setFinesToClear] = useState(1); // Default: Pagar 1 multa
+    const [finesToClear, setFinesToClear] = useState(1); 
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
@@ -350,10 +383,8 @@ const TransactionModal = ({ user, action, onClose }) => {
             setAmount(user.isOwner ? FINE_PRICE_OWNER.toFixed(2) : FINE_PRICE_PLAYER.toFixed(2));
             setDescription('Infração');
         } else {
-            // Sugere o valor total ou 0
             setAmount(user.balance > 0 ? user.balance.toFixed(2) : '');
             setDescription('Pagamento');
-            // Se for pagamento, default é limpar 1 multa se existir
             setFinesToClear(1);
         }
     }, [action, user]);
@@ -367,44 +398,30 @@ const TransactionModal = ({ user, action, onClose }) => {
             const value = parseFloat(amount);
             const userRef = doc(db, getCollectionPath('users'), user.uid);
             const transactionsRef = collection(db, getCollectionPath('transactions'));
-
             const batch = writeBatch(db);
 
             const newTrans = doc(transactionsRef);
             batch.set(newTrans, {
-                userId: user.uid,
-                type: action, // 'fine' ou 'payment'
-                amount: value,
-                description: description,
-                createdAt: serverTimestamp()
+                userId: user.uid, type: action, amount: value, description: description, createdAt: serverTimestamp()
             });
 
             const currentBalance = parseFloat(user.balance || 0);
             const currentFines = parseInt(user.fines || 0);
 
             if (action === 'fine') {
-                batch.update(userRef, {
+                batch.update(userRef, { 
                     balance: currentBalance + value,
                     fines: currentFines + 1 
                 });
             } else {
-                // Pagamento: Reduz dinheiro e Opcionalmente reduz infrações
                 const newBalance = Math.max(0, currentBalance - value);
-                const newFines = Math.max(0, currentFines - finesToClear);
-                
-                batch.update(userRef, { 
-                    balance: newBalance,
-                    fines: newFines
-                });
+                const newFines = Math.max(0, currentFines - finesToClear); 
+                batch.update(userRef, { balance: newBalance, fines: newFines });
             }
 
             await batch.commit();
             onClose();
-        } catch (e) {
-            alert('Erro: ' + e.message);
-        } finally {
-            setLoading(false);
-        }
+        } catch (e) { alert('Erro: ' + e.message); } finally { setLoading(false); }
     };
 
     return (
@@ -414,15 +431,12 @@ const TransactionModal = ({ user, action, onClose }) => {
                     {action === 'fine' ? <MinusCircle /> : <CheckCircle />}
                     {action === 'fine' ? `Aplicar Multa: ${user.displayName}` : `Receber de: ${user.displayName}`}
                 </h2>
-                
                 <div className="space-y-4">
                     <div>
                         <label className="text-xs font-bold text-slate-400">VALOR (R$)</label>
                         <input type="number" step="0.50" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white mt-1 text-lg font-bold" value={amount} onChange={e => setAmount(e.target.value)} />
                         {action === 'fine' && <p className="text-[10px] text-slate-500 mt-1">Edite se for um valor especial.</p>}
                     </div>
-                    
-                    {/* CONTROLE DE BAIXA DE INFRAÇÕES (Só aparece no Pagamento) */}
                     {action === 'payment' && (
                         <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
                             <label className="text-xs font-bold text-slate-400 block mb-2">QUITA QUANTAS INFRAÇÕES?</label>
@@ -431,18 +445,11 @@ const TransactionModal = ({ user, action, onClose }) => {
                                 <span className="text-white font-bold">{finesToClear}</span>
                                 <button onClick={() => setFinesToClear(finesToClear + 1)} className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded"><Plus className="w-4 h-4"/></button>
                             </div>
-                            <p className="text-[10px] text-slate-500 mt-1 text-center">0 = Pagamento parcial (não limpa strike)</p>
+                            <p className="text-[10px] text-slate-500 mt-1 text-center">Reduz a contagem para liberar o jogador.</p>
                         </div>
                     )}
-
-                    <div>
-                        <label className="text-xs font-bold text-slate-400">MOTIVO / DESCRIÇÃO</label>
-                        <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white mt-1" value={description} onChange={e => setDescription(e.target.value)} />
-                    </div>
-                    
-                    <button onClick={handleSave} disabled={loading} className={`w-full text-white font-bold py-3 rounded-xl shadow-lg ${action === 'fine' ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
-                        {loading ? 'Salvando...' : 'Confirmar'}
-                    </button>
+                    <div><label className="text-xs font-bold text-slate-400">MOTIVO / DESCRIÇÃO</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white mt-1" value={description} onChange={e => setDescription(e.target.value)} /></div>
+                    <button onClick={handleSave} disabled={loading} className={`w-full text-white font-bold py-3 rounded-xl shadow-lg ${action === 'fine' ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>{loading ? 'Salvando...' : 'Confirmar'}</button>
                     <button onClick={onClose} className="w-full text-slate-400 py-2 hover:text-white">Cancelar</button>
                 </div>
             </div>
@@ -455,104 +462,23 @@ const FinesScreen = ({ users, isAdmin, onOpenTransaction }) => {
     const [transactions, setTransactions] = useState([]);
     const [showUserSelect, setShowUserSelect] = useState(false);
 
-    // FILTRO: Só mostra quem tem SALDO DEVEDOR > 0
     const finesList = users.filter(u => u.balance > 0.01).sort((a, b) => b.balance - a.balance);
     const totalDebt = finesList.reduce((acc, u) => acc + (u.balance || 0), 0);
 
     useEffect(() => {
         if (!selectedUser) return;
         const q = query(collection(db, getCollectionPath('transactions')), where('userId', '==', selectedUser.uid), orderBy('createdAt', 'desc'));
-        const unsub = onSnapshot(q, (snap) => {
-            setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-        });
+        const unsub = onSnapshot(q, (snap) => { setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() }))); });
         return () => unsub();
     }, [selectedUser]);
 
     return (
         <div className="space-y-6 pb-20">
-            {showUserSelect && (
-                <UserSelectModal 
-                    users={users} 
-                    onClose={() => setShowUserSelect(false)} 
-                    onSelect={(user) => {
-                        setShowUserSelect(false);
-                        onOpenTransaction(user, 'fine');
-                    }} 
-                />
-            )}
-
-            <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold text-white flex items-center gap-2"><Banknote className="text-red-400" /> Financeiro</h2>
-                {isAdmin && (
-                    <button 
-                        onClick={() => setShowUserSelect(true)} 
-                        className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1 shadow-lg"
-                    >
-                        <PlusCircle className="w-3 h-3" /> Aplicar Multa
-                    </button>
-                )}
-            </div>
-            
-            <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 text-center shadow-lg">
-                <span className="text-slate-400 text-xs font-bold uppercase tracking-wider">Total a Receber</span>
-                <div className="text-4xl font-bold text-emerald-400 mt-2">R$ {totalDebt.toFixed(2).replace('.', ',')}</div>
-            </div>
-
-            {selectedUser && (
-                <div className="bg-slate-800 rounded-xl border border-slate-600 overflow-hidden animate-in slide-in-from-bottom-5">
-                    <div className="bg-slate-700 p-3 flex justify-between items-center cursor-pointer" onClick={() => setSelectedUser(null)}>
-                        <span className="font-bold text-white flex items-center gap-2"><Receipt className="w-4 h-4" /> Extrato: {selectedUser.displayName}</span>
-                        <ChevronUp className="w-4 h-4 text-slate-300" />
-                    </div>
-                    <div className="p-3 max-h-60 overflow-y-auto space-y-2">
-                        {transactions.length === 0 ? <p className="text-center text-slate-500 text-xs">Sem histórico.</p> : transactions.map(t => (
-                            <div key={t.id} className="flex justify-between items-center text-sm border-b border-slate-700/50 pb-2 last:border-0">
-                                <div>
-                                    <span className={`font-bold block ${t.type === 'fine' ? 'text-red-400' : 'text-emerald-400'}`}>{t.type === 'fine' ? 'Multa' : 'Pagamento'}</span>
-                                    <span className="text-xs text-slate-400">{t.description}</span>
-                                    <span className="text-[10px] text-slate-500 block">{t.createdAt?.toDate().toLocaleDateString()}</span>
-                                </div>
-                                <span className={`font-bold ${t.type === 'fine' ? 'text-red-400' : 'text-emerald-400'}`}>
-                                    {t.type === 'fine' ? '+' : '-'} R$ {t.amount.toFixed(2)}
-                                </span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            <div className="space-y-3">
-                {finesList.length === 0 ? (
-                    <div className="text-center text-slate-500 py-10">Ninguém deve nada! 🙌</div>
-                ) : (
-                    finesList.map(user => (
-                        <div key={user.uid} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center justify-between shadow-sm">
-                            <div className="flex items-center gap-3 cursor-pointer" onClick={() => setSelectedUser(selectedUser?.uid === user.uid ? null : user)}>
-                                <AvatarDisplay avatar={user.avatar} size="sm" />
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-bold text-white">{user.displayName}</span>
-                                        {user.fines >= 3 && <span className="text-[10px] bg-red-600 text-white px-1 rounded animate-pulse">BANIDO</span>}
-                                    </div>
-                                    <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
-                                        {user.fines} infrações <ChevronDown className="w-3 h-3" />
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div className="flex flex-col items-end gap-1">
-                                <span className="text-lg font-bold text-red-400">R$ {(user.balance || 0).toFixed(2).replace('.', ',')}</span>
-                                {isAdmin && (
-                                    <div className="flex gap-2 mt-1">
-                                        <button onClick={() => onOpenTransaction(user, 'payment')} className="bg-emerald-900/30 text-emerald-400 px-2 py-1 rounded text-xs border border-emerald-800 hover:bg-emerald-900/50 font-bold">PAGAR</button>
-                                        <button onClick={() => onOpenTransaction(user, 'fine')} className="bg-red-900/30 text-red-400 px-2 py-1 rounded text-xs border border-red-800 hover:bg-red-900/50 font-bold">+ MULTA</button>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    ))
-                )}
-            </div>
+            {showUserSelect && (<UserSelectModal users={users} onClose={() => setShowUserSelect(false)} onSelect={(user) => { setShowUserSelect(false); onOpenTransaction(user, 'fine'); }} />)}
+            <div className="flex justify-between items-center"><h2 className="text-xl font-bold text-white flex items-center gap-2"><Banknote className="text-red-400" /> Financeiro</h2>{isAdmin && (<button onClick={() => setShowUserSelect(true)} className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1 shadow-lg"><PlusCircle className="w-3 h-3" /> Aplicar Multa</button>)}</div>
+            <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 text-center shadow-lg"><span className="text-slate-400 text-xs font-bold uppercase tracking-wider">Total a Receber</span><div className="text-4xl font-bold text-emerald-400 mt-2">R$ {totalDebt.toFixed(2).replace('.', ',')}</div></div>
+            {selectedUser && (<div className="bg-slate-800 rounded-xl border border-slate-600 overflow-hidden animate-in slide-in-from-bottom-5"><div className="bg-slate-700 p-3 flex justify-between items-center cursor-pointer" onClick={() => setSelectedUser(null)}><span className="font-bold text-white flex items-center gap-2"><Receipt className="w-4 h-4" /> Extrato: {selectedUser.displayName}</span><ChevronUp className="w-4 h-4 text-slate-300" /></div><div className="p-3 max-h-60 overflow-y-auto space-y-2">{transactions.length === 0 ? <p className="text-center text-slate-500 text-xs">Sem histórico.</p> : transactions.map(t => (<div key={t.id} className="flex justify-between items-center text-sm border-b border-slate-700/50 pb-2 last:border-0"><div><span className={`font-bold block ${t.type === 'fine' ? 'text-red-400' : 'text-emerald-400'}`}>{t.type === 'fine' ? 'Multa' : 'Pagamento'}</span><span className="text-xs text-slate-400">{t.description}</span><span className="text-[10px] text-slate-500 block">{t.createdAt?.toDate().toLocaleDateString()}</span></div><span className={`font-bold ${t.type === 'fine' ? 'text-red-400' : 'text-emerald-400'}`}>{t.type === 'fine' ? '+' : '-'} R$ {t.amount.toFixed(2)}</span></div>))}</div></div>)}
+            <div className="space-y-3">{finesList.length === 0 ? (<div className="text-center text-slate-500 py-10">Ninguém deve nada! 🙌</div>) : (finesList.map(user => (<div key={user.uid} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center justify-between shadow-sm"><div className="flex items-center gap-3 cursor-pointer" onClick={() => setSelectedUser(selectedUser?.uid === user.uid ? null : user)}><AvatarDisplay avatar={user.avatar} size="sm" /><div><div className="flex items-center gap-2"><span className="font-bold text-white">{user.displayName}</span>{isPlayerBanned(user) && <span className="text-[10px] bg-red-600 text-white px-1 rounded animate-pulse">BANIDO</span>}</div><div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">{user.fines} infrações <ChevronDown className="w-3 h-3" /></div></div></div><div className="flex flex-col items-end gap-1"><span className="text-lg font-bold text-red-400">R$ {(user.balance || 0).toFixed(2).replace('.', ',')}</span>{isAdmin && (<div className="flex gap-2 mt-1"><button onClick={() => onOpenTransaction(user, 'payment')} className="bg-emerald-900/30 text-emerald-400 px-2 py-1 rounded text-xs border border-emerald-800 hover:bg-emerald-900/50 font-bold">PAGAR</button><button onClick={() => onOpenTransaction(user, 'fine')} className="bg-red-900/30 text-red-400 px-2 py-1 rounded text-xs border border-red-800 hover:bg-red-900/50 font-bold">+ MULTA</button></div>)}</div></div>)))}</div>
         </div>
     );
 };
@@ -574,7 +500,7 @@ const RankingList = ({ matches, users, period }) => {
   return (
     <div className="space-y-3">
       {ranking.map((player, index) => {
-        const isBanned = player.fines >= 3;
+        const isBanned = isPlayerBanned(player);
         return (
           <div key={player.uid} className={`relative flex items-center p-4 rounded-xl border ${isBanned ? 'bg-red-900/20 border-red-800' : 'bg-slate-800 border-slate-700'} shadow-sm`}>
             <div className="flex-shrink-0 w-8 text-center font-bold text-slate-400 text-xl">#{index + 1}</div>
@@ -608,7 +534,7 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
   const [guestNameP2, setGuestNameP2] = useState('');
   const [loading, setLoading] = useState(false);
   
-  const isUserBanned = selectedP1 && !isGuestP1 && selectedP1.fines >= 3;
+  const isUserBanned = selectedP1 && !isGuestP1 && isPlayerBanned(selectedP1);
   if (isUserBanned && !isAdmin) return <div className="p-6 text-center"><AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" /><h2 className="text-xl font-bold text-white mb-2">Suspenso!</h2><button onClick={onClose} className="bg-slate-700 text-white px-4 py-2 rounded-lg">Voltar</button></div>;
 
   const filterUsers = (search, excludeUid) => users.filter(u => (excludeUid ? u.uid !== excludeUid : true) && u.displayName.toLowerCase().includes(search.toLowerCase()));
@@ -616,7 +542,7 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
   const UserOption = ({ user, onClick }) => (
       <button type="button" onClick={onClick} className="w-full text-left px-4 py-3 hover:bg-slate-700 text-slate-200 border-b border-slate-700/50 flex items-center justify-between">
         <div className="flex items-center gap-3"><AvatarDisplay avatar={user.avatar} size="sm" /><div><span className="block font-bold">{user.displayName}</span><span className="text-[10px] text-slate-400">{user.isOffline ? 'Sem Conta' : user.email}</span></div></div>
-        {user.fines >= 3 && <span className="text-xs text-red-400 border border-red-500/30 px-1 rounded">Suspenso</span>}
+        {isPlayerBanned(user) && <span className="text-xs text-red-400 border border-red-500/30 px-1 rounded">Suspenso</span>}
       </button>
   );
 
@@ -806,7 +732,7 @@ const AdminPanel = ({ users, onOpenTransaction }) => {
       <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
         <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><UserPlus className="w-4 h-4" /> Cadastrar Sem Conta</h3>
         <form onSubmit={addOfflinePlayer} className="flex flex-col gap-2">
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
                 <input type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineName} onChange={(e) => setNewOfflineName(e.target.value)} required />
                 <input type="email" placeholder="E-mail real (opcional)" className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineEmail} onChange={(e) => setNewOfflineEmail(e.target.value)} />
             </div>
@@ -929,7 +855,7 @@ export default function App() {
       
       <main className="max-w-2xl mx-auto p-4 space-y-6 min-h-screen">
         <div className="hidden md:flex justify-between items-center mb-8 pt-8">
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Ping Pong ADS</h1>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Ping Pong Master</h1>
             <div className="flex items-center gap-4">
                 {user ? (
                     <>
@@ -944,7 +870,7 @@ export default function App() {
 
         {view === 'dashboard' && (<><div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700 overflow-x-auto">{['day', 'week', 'month', 'all'].map((p) => (<button key={p} onClick={() => setPeriod(p)} className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${period === p ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>{p === 'day' ? 'Hoje' : p === 'week' ? 'Semana' : p === 'month' ? 'Mês' : 'Geral'}</button>))}</div><RankingList matches={matchesList} users={usersList} period={period} /><button onClick={() => setView(user ? 'newMatch' : 'auth')} className="fixed bottom-20 right-4 md:bottom-8 md:right-8 bg-emerald-500 hover:bg-emerald-400 text-white rounded-full p-4 shadow-2xl shadow-emerald-500/30 transition-transform hover:scale-110 z-50 group"><PlusCircle className="w-8 h-8" /></button></>)}
         {view === 'newMatch' && user && (<div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-xl relative"><button onClick={() => setView('dashboard')} className="absolute top-4 right-4 text-slate-400 hover:text-white"><XCircle /></button><NewMatch users={usersList} currentUser={user} isAdmin={isAdmin} onClose={() => setView('dashboard')} onSuccess={(id, status) => { if (status === 'pending_guest') setPendingConfirmationMatchId(id); else { setView('dashboard'); alert(status === 'confirmed' ? 'Partida registrada!' : 'Partida enviada para confirmação!'); } }} /></div>)}
-        {view === 'history' && (<div className="space-y-4"><h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><History className="text-cyan-400" /> Histórico Recente</h2>{matchesList.slice(0, 20).map(m => (<div key={m.id} className="bg-slate-800 p-4 rounded-lg border border-slate-700 flex flex-col gap-2"><div className="flex justify-between items-center"><div className="flex flex-col"><span className="text-slate-300 font-bold">{m.p1Name} <span className="text-emerald-400">{m.s1}</span></span><span className="text-slate-300 font-bold">{m.p2Name} <span className="text-emerald-400">{m.s2}</span></span><span className="text-xs text-slate-500 mt-1">{m.createdAt?.toDate().toLocaleDateString()} - {m.status === 'confirmed' ? 'Confirmado' : 'Pendente'}</span></div>{m.status === 'confirmed' && <CheckCircle className="text-emerald-500/20 w-6 h-6" />}{m.status !== 'confirmed' && <History className="text-amber-500/50 w-6 h-6 animate-pulse" />}</div>{m.status !== 'confirmed' && user && (<div className="flex gap-2 justify-end mt-2 border-t border-slate-700 pt-2 flex-wrap">{m.createdBy === user.uid && m.p2Id.startsWith('guest_') && (<button onClick={() => setPendingConfirmationMatchId(m.id)} className="text-xs bg-slate-700 text-white px-3 py-1 rounded border border-slate-600 flex items-center gap-1 hover:bg-slate-600"><QrCode className="w-3 h-3" /> Ver QR Code</button>)}{m.createdBy === user.uid && (<button onClick={() => handleDeleteMatch(m.id)} className="text-xs bg-red-900/20 text-red-400 px-3 py-1 rounded border border-red-900/50 flex items-center gap-1 hover:bg-red-900/40"><Trash2 className="w-3 h-3" /> Cancelar</button>)}{m.p2Id === user.uid && (<button onClick={() => handleP2Confirm(m.id)} className="text-xs bg-emerald-900/20 text-emerald-400 px-3 py-1 rounded border border-emerald-900/50 flex items-center gap-1 hover:bg-emerald-900/40"><Check className="w-3 h-3" /> Confirmar</button>)}{isAdmin && (<><button onClick={() => handleForceConfirm(m.id)} className="text-xs bg-amber-900/20 text-amber-400 px-3 py-1 rounded border border-amber-900/50 flex items-center gap-1 hover:bg-amber-900/40"><Check className="w-3 h-3" /> Validar</button><button onClick={() => handleDeleteMatch(m.id)} className="text-xs bg-red-900/20 text-red-400 px-3 py-1 rounded border border-red-900/50 flex items-center gap-1 hover:bg-red-900/40"><Trash2 className="w-3 h-3" /> Excluir</button></>)}</div>)}</div>))}</div>)}
+        {view === 'history' && (<div className="space-y-4"><h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><History className="text-cyan-400" /> Histórico Recente</h2>{matchesList.slice(0, 20).map(m => (<div key={m.id} className="bg-slate-800 p-4 rounded-lg border border-slate-700 flex flex-col gap-2"><div className="flex justify-between items-center"><div className="flex flex-col"><span className="text-slate-300 font-bold">{m.p1Name} <span className="text-emerald-400">{m.s1}</span></span><span className="text-slate-300 font-bold">{m.p2Name} <span className="text-emerald-400">{m.s2}</span></span><span className="text-xs text-slate-500 mt-1">{m.createdAt?.toDate().toLocaleDateString()} - {m.status === 'confirmed' ? 'Confirmado' : 'Pendente'}</span></div>{m.status === 'confirmed' && <CheckCircle className="text-emerald-500/20 w-6 h-6" />}{m.status !== 'confirmed' && <History className="text-amber-500/50 w-6 h-6 animate-pulse" />}</div>{/* AÇÕES PARA JOGOS PENDENTES OU SE FOR ADMIN EM JOGOS CONFIRMADOS */}{(m.status !== 'confirmed' || isAdmin) && user && (<div className="flex gap-2 justify-end mt-2 border-t border-slate-700 pt-2 flex-wrap">{m.createdBy === user.uid && m.p2Id.startsWith('guest_') && (<button onClick={() => setPendingConfirmationMatchId(m.id)} className="text-xs bg-slate-700 text-white px-3 py-1 rounded border border-slate-600 flex items-center gap-1 hover:bg-slate-600"><QrCode className="w-3 h-3" /> Ver QR Code</button>)}{m.createdBy === user.uid && (<button onClick={() => handleDeleteMatch(m.id)} className="text-xs bg-red-900/20 text-red-400 px-3 py-1 rounded border border-red-900/50 flex items-center gap-1 hover:bg-red-900/40"><Trash2 className="w-3 h-3" /> Cancelar</button>)}{m.p2Id === user.uid && (<button onClick={() => handleP2Confirm(m.id)} className="text-xs bg-emerald-900/20 text-emerald-400 px-3 py-1 rounded border border-emerald-900/50 flex items-center gap-1 hover:bg-emerald-900/40"><Check className="w-3 h-3" /> Confirmar</button>)}{isAdmin && (<><button onClick={() => handleForceConfirm(m.id)} className="text-xs bg-amber-900/20 text-amber-400 px-3 py-1 rounded border border-amber-900/50 flex items-center gap-1 hover:bg-amber-900/40"><Check className="w-3 h-3" /> Validar</button><button onClick={() => handleDeleteMatch(m.id)} className="text-xs bg-red-900/20 text-red-400 px-3 py-1 rounded border border-red-900/50 flex items-center gap-1 hover:bg-red-900/40"><Trash2 className="w-3 h-3" /> Excluir</button></>)}</div>)}</div>))}</div>)}
         {view === 'fines' && <FinesScreen users={usersList} isAdmin={isAdmin} onOpenTransaction={openTransaction} />}
         {view === 'admin' && isAdmin && <AdminPanel users={usersList} onOpenTransaction={openTransaction} />}
       </main>
