@@ -6,7 +6,8 @@ import {
   createUserWithEmailAndPassword, 
   signOut, 
   onAuthStateChanged,
-  updateProfile
+  updateProfile,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -53,7 +54,12 @@ import {
   Minus,
   Plus,
   Bell,
-  Globe // Novo ícone para Internet
+  Globe,
+  TrendingUp,
+  Zap,
+  Calendar,
+  Clock,
+  BarChart3
 } from 'lucide-react';
 
 // --- CONFIGURAÇÃO DO FIREBASE ---
@@ -67,7 +73,7 @@ const firebaseConfig = {
 };
 
 // --- CONFIGURAÇÕES DO GRUPO ---
-const ADMIN_EMAILS = ['santoslorrany250@gmail.com']; 
+const ADMIN_EMAILS = ['santoslorrany250@gmail.com', 'yurikauanim@gmail.com', 'velosofrancivaldo5@gmail.com']; 
 const FINE_PRICE_PLAYER = 5.00; 
 const FINE_PRICE_OWNER = 4.00; 
 
@@ -137,7 +143,6 @@ const dateFilters = {
 // --- COMPONENTES ---
 
 const AvatarDisplay = ({ avatar, size = "md", className = "" }) => {
-    // Aceita data:image (upload) OU http (link da internet)
     const isImage = avatar && (avatar.startsWith('data:image') || avatar.startsWith('http'));
     const sizeClasses = { sm: "w-8 h-8 text-lg", md: "w-12 h-12 text-2xl", lg: "w-16 h-16 text-4xl", xl: "w-24 h-24 text-6xl" };
     return (
@@ -147,6 +152,83 @@ const AvatarDisplay = ({ avatar, size = "md", className = "" }) => {
             ) : (
                 <span role="img">{avatar || '👤'}</span>
             )}
+        </div>
+    );
+};
+
+// --- MODAL DE ESTATÍSTICAS DETALHADAS (ATUALIZADO) ---
+const PlayerStatsModal = ({ player, onClose }) => {
+    if (!player) return null;
+
+    const netScore = player.wins - player.losses; // Saldo de Vitórias
+    const winRate = player.games > 0 ? Math.round((player.wins / player.games) * 100) : 0;
+
+    return (
+        <div className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-800 w-full max-w-sm rounded-2xl p-6 border border-slate-700 shadow-2xl animate-in zoom-in-95">
+                <div className="flex justify-between items-start mb-4">
+                    <div className="flex items-center gap-3">
+                        <AvatarDisplay avatar={player.avatar} size="lg" className="border-2 border-emerald-500" />
+                        <div>
+                            <h2 className="text-xl font-bold text-white">{player.displayName}</h2>
+                            <span className={`text-xs px-2 py-0.5 rounded-full border ${player.isOwner ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-slate-700 text-slate-400 border-slate-600'}`}>
+                                {player.isOwner ? 'Dono da Raquete' : 'Jogador'}
+                            </span>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white bg-slate-700 rounded-full p-1"><XCircle className="w-6 h-6" /></button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700 text-center">
+                        <span className="text-xs text-slate-400 font-bold uppercase">Pontuação</span>
+                        <div className={`text-2xl font-black ${netScore >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {netScore > 0 ? '+' : ''}{netScore}
+                        </div>
+                        <span className="text-[10px] text-slate-500">Vitórias - Derrotas</span>
+                    </div>
+                    <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700 text-center">
+                        <span className="text-xs text-slate-400 font-bold uppercase">Aproveitamento</span>
+                        <div className="text-2xl font-black text-white">
+                            {winRate}%
+                        </div>
+                        <span className="text-[10px] text-slate-500">{player.wins}V / {player.losses}D</span>
+                    </div>
+                </div>
+
+                <div className="space-y-2">
+                    <div className="bg-slate-700/30 p-3 rounded-lg flex justify-between items-center">
+                        <span className="text-sm text-slate-300 flex items-center gap-2"><Trophy className="w-4 h-4 text-yellow-500" /> Total Partidas</span>
+                        <span className="font-bold text-white">{player.games}</span>
+                    </div>
+                    <div className="bg-slate-700/30 p-3 rounded-lg flex justify-between items-center">
+                        <span className="text-sm text-slate-300 flex items-center gap-2"><Plus className="w-4 h-4 text-emerald-500" /> Pontos Feitos</span>
+                        <span className="font-bold text-white">{player.pointsScored}</span>
+                    </div>
+                    <div className="bg-slate-700/30 p-3 rounded-lg flex justify-between items-center">
+                        <span className="text-sm text-slate-300 flex items-center gap-2"><Minus className="w-4 h-4 text-red-500" /> Pontos Sofridos</span>
+                        <span className="font-bold text-white">{player.pointsConceded}</span>
+                    </div>
+                    <div className="bg-slate-700/30 p-3 rounded-lg flex justify-between items-center border-t border-slate-600 mt-2">
+                        <span className="text-sm text-slate-300 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-blue-400" /> Saldo de Pontos</span>
+                        <span className={`font-bold ${player.pointDiff >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                            {player.pointDiff > 0 ? '+' : ''}{player.pointDiff}
+                        </span>
+                    </div>
+                    
+                    {/* SEÇÃO NOVA: CHILENAS */}
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                         <div className="bg-slate-700/30 p-3 rounded-lg flex flex-col items-center text-center">
+                            <span className="text-[10px] text-slate-400 mb-1 flex items-center gap-1"><Zap className="w-3 h-3 text-yellow-400" fill="currentColor" /> Chilenas Dadas</span>
+                            <span className="font-bold text-white text-lg">{player.chilenasGiven}</span>
+                         </div>
+                         <div className="bg-slate-700/30 p-3 rounded-lg flex flex-col items-center text-center">
+                            <span className="text-[10px] text-slate-400 mb-1 flex items-center gap-1"><AlertTriangle className="w-3 h-3 text-orange-500" /> Chilenas Tomadas</span>
+                            <span className="font-bold text-white text-lg">{player.chilenasReceived}</span>
+                         </div>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 };
@@ -231,13 +313,16 @@ const UserSelectModal = ({ users, onClose, onSelect }) => {
     );
 };
 
+// --- TELA DE AUTH ---
 const AuthScreen = ({ onCancel, onLoginSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
+  const [showReset, setShowReset] = useState(false); 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false); // Estado para ver senha
 
   const migrateOfflineUser = async (newUserUid, userEmail) => {
     try {
@@ -293,6 +378,33 @@ const AuthScreen = ({ onCancel, onLoginSuccess }) => {
     } catch (err) { setError(err.message); } finally { setLoading(false); }
   };
 
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    if (!email) { setError("Digite seu e-mail primeiro."); return; }
+    setLoading(true); setError('');
+    try { await sendPasswordResetEmail(auth, email); alert("E-mail enviado!"); setShowReset(false); } 
+    catch (err) { setError("Erro: " + err.message); } finally { setLoading(false); }
+  };
+
+  if (showReset) {
+      return (
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 text-slate-100">
+            <div className="w-full max-w-md bg-slate-800 rounded-xl p-6 shadow-2xl border border-slate-700 relative">
+                <button onClick={() => setShowReset(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><XCircle /></button>
+                <div className="text-center mb-6"><h2 className="text-2xl font-bold">Recuperar Senha</h2><p className="text-slate-400 text-sm">Digite seu e-mail para receber o link.</p></div>
+                <form onSubmit={handleResetPassword} className="space-y-4">
+                    <div><label className="block text-sm font-medium text-slate-300 mb-1">Email</label><input type="email" required className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+                    {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+                    <button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition-colors disabled:opacity-50">{loading ? 'Enviando...' : 'Enviar Link'}</button>
+                </form>
+                <div className="mt-4 text-center">
+                    <button onClick={() => setShowReset(false)} className="text-slate-400 text-sm hover:text-white underline">Voltar para o Login</button>
+                </div>
+            </div>
+        </div>
+      );
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 text-slate-100">
       <div className="w-full max-w-md bg-slate-800 rounded-xl p-6 shadow-2xl border border-slate-700 relative">
@@ -301,7 +413,29 @@ const AuthScreen = ({ onCancel, onLoginSuccess }) => {
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isLogin && (<div><label className="block text-sm font-medium text-slate-300 mb-1">Nome</label><input type="text" required className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" value={name} onChange={(e) => setName(e.target.value)} /></div>)}
           <div><label className="block text-sm font-medium text-slate-300 mb-1">Email</label><input type="email" required className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-          <div><label className="block text-sm font-medium text-slate-300 mb-1">Senha</label><input type="password" required className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
+          
+          {/* CAMPO DE SENHA COM TOGGLE */}
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">Senha</label>
+            <div className="relative">
+                <input 
+                    type={showPassword ? "text" : "password"} 
+                    required 
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 pr-10 focus:ring-2 focus:ring-emerald-500 outline-none" 
+                    value={password} 
+                    onChange={(e) => setPassword(e.target.value)} 
+                />
+                <button 
+                    type="button" 
+                    onClick={() => setShowPassword(!showPassword)} 
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+            </div>
+          </div>
+
+          {isLogin && (<div className="text-right"><button type="button" onClick={() => setShowReset(true)} className="text-emerald-400 text-xs hover:underline">Esqueci minha senha</button></div>)}
           {error && <p className="text-red-400 text-sm text-center">{error}</p>}
           <button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition-colors disabled:opacity-50">{loading ? '...' : (isLogin ? 'Entrar' : 'Criar Conta')}</button>
         </form>
@@ -318,7 +452,7 @@ const ProfileModal = ({ user, userDoc, onClose }) => {
     const [name, setName] = useState(userDoc?.displayName || '');
     const [avatar, setAvatar] = useState(userDoc?.avatar || '👤');
     const [loading, setLoading] = useState(false);
-    const [showUrlInput, setShowUrlInput] = useState(false); // Estado para mostrar input de link
+    const [showUrlInput, setShowUrlInput] = useState(false);
     const fileInputRef = useRef(null);
 
     const handleImageUpload = async (e) => {
@@ -344,15 +478,12 @@ const ProfileModal = ({ user, userDoc, onClose }) => {
                 <h2 className="text-xl font-bold text-white mb-4 text-center">Editar Perfil</h2>
                 <div className="flex flex-col items-center mb-6 gap-4">
                     <AvatarDisplay avatar={avatar} size="xl" className="border-4 border-slate-600 shadow-lg" />
-                    
                     <div className="flex gap-2">
                         <button onClick={() => setAvatar(getRandomAvatar())} className="bg-slate-700 text-white px-3 py-2 rounded-lg text-xs flex items-center gap-2 hover:bg-slate-600"><RefreshCw className="w-3 h-3" /> Emoji</button>
                         <button onClick={() => fileInputRef.current.click()} className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs flex items-center gap-2 hover:bg-emerald-500"><Camera className="w-3 h-3" /> Foto</button>
                         <button onClick={() => setShowUrlInput(!showUrlInput)} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs flex items-center gap-2 hover:bg-blue-500"><Globe className="w-3 h-3" /> Link</button>
                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                     </div>
-
-                    {/* Input para URL de Imagem da Internet */}
                     {showUrlInput && (
                         <input 
                             type="text" 
@@ -483,16 +614,65 @@ const FinesScreen = ({ users, isAdmin, onOpenTransaction }) => {
     );
 };
 
-const RankingList = ({ matches, users, period }) => {
+// --- MODIFICADO: RANKING LIST PARA CALCULAR CHILENAS ---
+const RankingList = ({ matches, users, period, onSelectPlayer }) => {
   const ranking = useMemo(() => {
     const stats = {};
-    users.forEach(u => { stats[u.uid] = { ...u, wins: 0, losses: 0, games: 0 }; });
+    users.forEach(u => { 
+        stats[u.uid] = { 
+            ...u, 
+            wins: 0, 
+            losses: 0, 
+            games: 0, 
+            pointsScored: 0, 
+            pointsConceded: 0, 
+            pointDiff: 0,
+            chilenasGiven: 0,     // NOVO
+            chilenasReceived: 0   // NOVO
+        }; 
+    });
+    
     matches.forEach(m => {
       if (m.status !== 'confirmed' || !m.createdAt || !dateFilters[period](m.createdAt.toDate())) return;
-      if (stats[m.p1Id]) { stats[m.p1Id].games++; if (Number(m.s1) > Number(m.s2)) stats[m.p1Id].wins++; else stats[m.p1Id].losses++; }
-      if (m.p2Id && stats[m.p2Id]) { stats[m.p2Id].games++; if (Number(m.s2) > Number(m.s1)) stats[m.p2Id].wins++; else stats[m.p2Id].losses++; }
+      const s1 = Number(m.s1 || 0);
+      const s2 = Number(m.s2 || 0);
+
+      if (stats[m.p1Id]) { 
+          stats[m.p1Id].games++; 
+          stats[m.p1Id].pointsScored += s1;
+          stats[m.p1Id].pointsConceded += s2;
+          stats[m.p1Id].pointDiff += (s1 - s2);
+          if (s1 > s2) {
+              stats[m.p1Id].wins++; 
+              if (m.isChilena) stats[m.p1Id].chilenasGiven++; // P1 deu chilena
+          } else {
+              stats[m.p1Id].losses++; 
+              if (m.isChilena) stats[m.p1Id].chilenasReceived++; // P1 levou chilena
+          }
+      }
+      if (m.p2Id && stats[m.p2Id]) { 
+            stats[m.p2Id].games++; 
+            stats[m.p2Id].pointsScored += s2;
+            stats[m.p2Id].pointsConceded += s1;
+            stats[m.p2Id].pointDiff += (s2 - s1);
+            if (s2 > s1) {
+                stats[m.p2Id].wins++; 
+                if (m.isChilena) stats[m.p2Id].chilenasGiven++; // P2 deu chilena
+            } else {
+                stats[m.p2Id].losses++; 
+                if (m.isChilena) stats[m.p2Id].chilenasReceived++; // P2 levou chilena
+            }
+      }
     });
-    return Object.values(stats).filter(p => p.games > 0 || p.fines > 0).sort((a, b) => b.wins - a.wins || (b.wins/(b.games||1)) - (a.wins/(a.games||1)));
+    
+    // NOVA LÓGICA: Classificar por saldo (Vitórias - Derrotas)
+    return Object.values(stats).filter(p => p.games > 0 || p.fines > 0).sort((a, b) => {
+        const scoreA = a.wins - a.losses;
+        const scoreB = b.wins - b.losses;
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        if (b.wins !== a.wins) return b.wins - a.wins; // Desempate 1: Quem tem mais vitórias
+        return b.pointDiff - a.pointDiff; // Desempate 2: Saldo de pontos
+    });
   }, [matches, users, period]);
 
   if (ranking.length === 0) return <div className="text-center p-8 text-slate-500"><Trophy className="w-12 h-12 mx-auto mb-2 opacity-20" /><p>Nenhum registro.</p></div>;
@@ -501,19 +681,30 @@ const RankingList = ({ matches, users, period }) => {
     <div className="space-y-3">
       {ranking.map((player, index) => {
         const isBanned = isPlayerBanned(player);
+        const netScore = player.wins - player.losses;
+
         return (
-          <div key={player.uid} className={`relative flex items-center p-4 rounded-xl border ${isBanned ? 'bg-red-900/20 border-red-800' : 'bg-slate-800 border-slate-700'} shadow-sm`}>
+          <div 
+            key={player.uid} 
+            onClick={() => onSelectPlayer(player)} // Clique para ver detalhes
+            className={`relative flex items-center p-4 rounded-xl border cursor-pointer transition-colors hover:bg-slate-700/50 ${isBanned ? 'bg-red-900/20 border-red-800' : 'bg-slate-800 border-slate-700'} shadow-sm`}
+          >
             <div className="flex-shrink-0 w-8 text-center font-bold text-slate-400 text-xl">#{index + 1}</div>
             <div className="ml-4 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <AvatarDisplay avatar={player.avatar} size="sm" />
                 <h3 className={`font-bold text-lg ${isBanned ? 'text-red-400' : 'text-white'}`}>{player.displayName}</h3>
                 {player.isOwner && <span className="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">Dono</span>}
-                {player.balance > 0 && <span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">Deve R$ {player.balance.toFixed(2)}</span>}
               </div>
-              <p className="text-sm text-slate-400">{player.wins} Vitórias • {player.losses} Derrotas</p>
+              <p className="text-sm text-slate-400">{player.wins}V • {player.losses}D <span className="text-xs text-slate-500">({player.games} jogos)</span></p>
             </div>
-            <div className="text-right"><span className="block text-2xl font-bold text-emerald-400">{Math.round((player.wins / (player.games || 1)) * 100)}%</span></div>
+            <div className="text-right">
+                {/* PONTUAÇÃO PRINCIPAL (SALDO DE VITÓRIAS) */}
+                <span className={`block text-xl font-bold ${netScore >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {netScore > 0 ? '+' : ''}{netScore}
+                </span>
+                <span className="text-[10px] text-slate-500 uppercase font-bold">Pontos</span>
+            </div>
           </div>
         );
       })}
@@ -533,7 +724,8 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
   const [isGuestP2, setIsGuestP2] = useState(false);
   const [guestNameP2, setGuestNameP2] = useState('');
   const [loading, setLoading] = useState(false);
-  
+  const [isChilenaMode, setIsChilenaMode] = useState(false);
+
   const isUserBanned = selectedP1 && !isGuestP1 && isPlayerBanned(selectedP1);
   if (isUserBanned && !isAdmin) return <div className="p-6 text-center"><AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" /><h2 className="text-xl font-bold text-white mb-2">Suspenso!</h2><button onClick={onClose} className="bg-slate-700 text-white px-4 py-2 rounded-lg">Voltar</button></div>;
 
@@ -546,29 +738,57 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
       </button>
   );
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!score1 || !score2) return;
+  const handleSubmit = async (winnerSide) => {
+    const isChilenaSubmit = typeof winnerSide === 'string';
+    
+    if (!isChilenaSubmit && (!score1 || !score2)) return;
     if (!isGuestP1 && !selectedP1) return;
     if (!isGuestP2 && !selectedP2) return;
 
     setLoading(true);
     try {
-      const matchData = { s1: parseInt(score1), s2: parseInt(score2), createdAt: serverTimestamp(), createdBy: currentUser.uid };
+      const matchData = { createdAt: serverTimestamp(), createdBy: currentUser.uid, isChilena: isChilenaSubmit };
+
       if (isGuestP1) { matchData.p1Name = guestNameP1 || 'Convidado 1'; matchData.p1Id = 'guest_' + Date.now() + '_1'; } 
       else { matchData.p1Name = selectedP1.displayName; matchData.p1Id = selectedP1.uid; }
 
       if (isGuestP2) { matchData.p2Name = guestNameP2 || 'Convidado 2'; matchData.p2Id = 'guest_' + Date.now() + '_2'; } 
       else { matchData.p2Name = selectedP2.displayName; matchData.p2Id = selectedP2.uid; }
 
-      if (isAdmin || (selectedP2 && selectedP2.isOffline) || isGuestP2 || (isGuestP1 && isGuestP2)) {
-          matchData.status = 'confirmed'; matchData.confirmedBy = isAdmin ? 'admin_scribe' : 'auto_scribe'; matchData.confirmedAt = serverTimestamp();
-      } else { matchData.status = 'pending_user'; }
+      if (isChilenaSubmit) {
+          if (winnerSide === 'p1') { matchData.s1 = 7; matchData.s2 = 0; }
+          else { matchData.s1 = 0; matchData.s2 = 7; }
+      } else {
+          matchData.s1 = parseInt(score1);
+          matchData.s2 = parseInt(score2);
+      }
+
+      // Lógica de Confirmação
+      let newStatus = 'pending_user';
+      let confBy = null;
+      let confAt = null;
+
+      if (isAdmin) {
+          newStatus = 'confirmed'; confBy = 'admin_scribe'; confAt = serverTimestamp();
+      } else {
+          if ((selectedP2 && !selectedP2.isOffline && !isGuestP2)) {
+              newStatus = 'pending_user'; 
+          } else {
+              newStatus = 'pending_guest'; // Exige scan do QR Code
+          }
+      }
+
+      matchData.status = newStatus;
+      if(confBy) matchData.confirmedBy = confBy;
+      if(confAt) matchData.confirmedAt = confAt;
       
       const docRef = await addDoc(collection(db, getCollectionPath('matches')), matchData);
       onSuccess(docRef.id, matchData.status);
     } catch (err) { alert('Erro: ' + err.message); setLoading(false); }
   };
+
+  // Apenas para controle visual do botão
+  const isAutoConfirmButton = isAdmin;
 
   return (
     <div className="space-y-6">
@@ -624,14 +844,33 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="text-center"><label className="block text-slate-400 text-xs mb-1">Placar J1</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 text-center text-2xl font-bold text-white focus:ring-2 focus:ring-emerald-500 outline-none" value={score1} onChange={(e) => setScore1(e.target.value)} /></div>
-        <div className="text-center"><label className="block text-slate-400 text-xs mb-1">Placar J2</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 text-center text-2xl font-bold text-white focus:ring-2 focus:ring-emerald-500 outline-none" value={score2} onChange={(e) => setScore2(e.target.value)} /></div>
+      <div className="flex justify-end">
+          <button type="button" onClick={() => setIsChilenaMode(!isChilenaMode)} className={`text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1 border transition-all ${isChilenaMode ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500' : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
+              <Zap className="w-3 h-3" fill={isChilenaMode ? "currentColor" : "none"} /> Modo Chilena {isChilenaMode ? 'ATIVADO' : ''}
+          </button>
       </div>
-      
-      <button onClick={handleSubmit} disabled={loading || ((!selectedP1 && !isGuestP1) || (!selectedP2 && !isGuestP2))} className={`w-full text-white font-bold py-4 rounded-xl transition-all shadow-lg mt-4 flex justify-center items-center gap-2 ${isAdmin ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'} disabled:bg-slate-700 disabled:text-slate-500`}>
-        {loading ? '...' : (isAdmin || isGuestP2 || (isGuestP1 && isGuestP2) ? 'Registrar (Auto-Confirmar)' : 'Enviar para Confirmação')}
-      </button>
+
+      {isChilenaMode ? (
+          <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2">
+              <button onClick={() => handleSubmit('p1')} disabled={loading || ((!selectedP1 && !isGuestP1) || (!selectedP2 && !isGuestP2))} className="bg-slate-800 border-2 border-slate-600 hover:border-yellow-500 hover:bg-yellow-500/10 p-4 rounded-xl flex flex-col items-center gap-2 disabled:opacity-50">
+                  <Zap className="w-8 h-8 text-yellow-400" fill="currentColor" /><span className="text-xs font-bold text-yellow-100">J1 Aplicou Chilena</span>
+              </button>
+              <button onClick={() => handleSubmit('p2')} disabled={loading || ((!selectedP1 && !isGuestP1) || (!selectedP2 && !isGuestP2))} className="bg-slate-800 border-2 border-slate-600 hover:border-yellow-500 hover:bg-yellow-500/10 p-4 rounded-xl flex flex-col items-center gap-2 disabled:opacity-50">
+                  <Zap className="w-8 h-8 text-yellow-400" fill="currentColor" /><span className="text-xs font-bold text-yellow-100">J2 Aplicou Chilena</span>
+              </button>
+          </div>
+      ) : (
+          <>
+            <div className="grid grid-cols-2 gap-4">
+                <div className="text-center"><label className="block text-slate-400 text-xs mb-1">Placar J1</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 text-center text-2xl font-bold text-white focus:ring-2 focus:ring-emerald-500 outline-none" value={score1} onChange={(e) => setScore1(e.target.value)} /></div>
+                <div className="text-center"><label className="block text-slate-400 text-xs mb-1">Placar J2</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 text-center text-2xl font-bold text-white focus:ring-2 focus:ring-emerald-500 outline-none" value={score2} onChange={(e) => setScore2(e.target.value)} /></div>
+            </div>
+            
+            <button onClick={handleSubmit} disabled={loading || ((!selectedP1 && !isGuestP1) || (!selectedP2 && !isGuestP2))} className={`w-full text-white font-bold py-4 rounded-xl transition-all shadow-lg mt-4 flex justify-center items-center gap-2 ${isAdmin ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'} disabled:bg-slate-700 disabled:text-slate-500`}>
+                {loading ? '...' : (isAutoConfirmButton ? 'Registrar (Auto-Confirmar)' : 'Enviar para Confirmação')}
+            </button>
+          </>
+      )}
     </div>
   );
 };
@@ -732,7 +971,7 @@ const AdminPanel = ({ users, onOpenTransaction }) => {
       <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
         <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><UserPlus className="w-4 h-4" /> Cadastrar Sem Conta</h3>
         <form onSubmit={addOfflinePlayer} className="flex flex-col gap-2">
-            <div className="flex flex-col sm:flex-row gap-2">
+            <div className="flex gap-2">
                 <input type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineName} onChange={(e) => setNewOfflineName(e.target.value)} required />
                 <input type="email" placeholder="E-mail real (opcional)" className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineEmail} onChange={(e) => setNewOfflineEmail(e.target.value)} />
             </div>
@@ -780,12 +1019,16 @@ export default function App() {
   const [view, setView] = useState('dashboard'); 
   const [usersList, setUsersList] = useState([]);
   const [matchesList, setMatchesList] = useState([]);
+  // ESTADO NOVO: Busca e Data no Histórico
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyDate, setHistoryDate] = useState(new Date().toISOString().split('T')[0]); // Padrão: Hoje
   const [period, setPeriod] = useState('all');
   const [pendingConfirmationMatchId, setPendingConfirmationMatchId] = useState(null);
   const [confirmMatchId, setConfirmMatchId] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [showProfile, setShowProfile] = useState(false);
-  const [transactionModal, setTransactionModal] = useState(null); // Global Transaction Modal
+  const [transactionModal, setTransactionModal] = useState(null); 
+  const [selectedPlayerStats, setSelectedPlayerStats] = useState(null); // Estado para modal de stats
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -816,7 +1059,6 @@ export default function App() {
   const handleForceConfirm = async (matchId) => { if(confirm('Juiz: Validar na força?')) await updateDoc(doc(db, getCollectionPath('matches'), matchId), { status: 'confirmed', confirmedBy: 'admin_force', confirmedAt: serverTimestamp() }); };
   const handleP2Confirm = async (matchId) => { await updateDoc(doc(db, getCollectionPath('matches'), matchId), { status: 'confirmed', confirmedBy: user.uid, confirmedAt: serverTimestamp() }); alert('Jogo confirmado!'); };
 
-  // Função para abrir o modal de transação (passada para AdminPanel e FinesScreen)
   const openTransaction = (userTarget, action) => {
       setTransactionModal({ user: userTarget, action });
   };
@@ -831,11 +1073,34 @@ export default function App() {
   const isAdmin = user && ADMIN_EMAILS.includes(user.email);
   const currentUserDoc = user ? usersList.find(u => u.uid === user.uid) : null;
 
+  // --- LÓGICA DE FILTRO DO HISTÓRICO ---
+  const filteredHistory = matchesList.filter(m => {
+      if (!m.createdAt) return false;
+      
+      // 1. Filtro de Data (Padrão: Hoje)
+      const matchDate = m.createdAt.toDate();
+      // Ajuste de fuso horário simples: pegar YYYY-MM-DD local
+      const dateStr = matchDate.toLocaleDateString('en-CA'); // Formato YYYY-MM-DD
+      
+      if (historyDate && dateStr !== historyDate) return false;
+
+      // 2. Filtro de Busca (Nome)
+      if (historySearch) {
+          const term = historySearch.toLowerCase();
+          const p1 = m.p1Name ? m.p1Name.toLowerCase() : '';
+          const p2 = m.p2Name ? m.p2Name.toLowerCase() : '';
+          return p1.includes(term) || p2.includes(term);
+      }
+
+      return true;
+  });
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 pb-20 md:pb-0 md:pl-20 relative">
       {pendingConfirmationMatchId && <QrModal matchId={pendingConfirmationMatchId} onClose={() => setPendingConfirmationMatchId(null)} />}
       {showProfile && user && <ProfileModal user={user} userDoc={currentUserDoc} onClose={() => setShowProfile(false)} />}
       {transactionModal && <TransactionModal user={transactionModal.user} action={transactionModal.action} onClose={() => setTransactionModal(null)} />}
+      {selectedPlayerStats && <PlayerStatsModal player={selectedPlayerStats} onClose={() => setSelectedPlayerStats(null)} />}
 
       <header className="bg-slate-800/50 backdrop-blur-md border-b border-slate-700 p-4 sticky top-0 z-20 flex justify-between items-center md:hidden">
         <div className="flex items-center gap-2"><Trophy className="text-emerald-400 w-6 h-6" /><span className="font-bold text-lg bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Master</span></div>
@@ -868,9 +1133,79 @@ export default function App() {
             </div>
         </div>
 
-        {view === 'dashboard' && (<><div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700 overflow-x-auto">{['day', 'week', 'month', 'all'].map((p) => (<button key={p} onClick={() => setPeriod(p)} className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${period === p ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>{p === 'day' ? 'Hoje' : p === 'week' ? 'Semana' : p === 'month' ? 'Mês' : 'Geral'}</button>))}</div><RankingList matches={matchesList} users={usersList} period={period} /><button onClick={() => setView(user ? 'newMatch' : 'auth')} className="fixed bottom-20 right-4 md:bottom-8 md:right-8 bg-emerald-500 hover:bg-emerald-400 text-white rounded-full p-4 shadow-2xl shadow-emerald-500/30 transition-transform hover:scale-110 z-50 group"><PlusCircle className="w-8 h-8" /></button></>)}
+        {view === 'dashboard' && (<><div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700 overflow-x-auto">{['day', 'week', 'month', 'all'].map((p) => (<button key={p} onClick={() => setPeriod(p)} className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${period === p ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>{p === 'day' ? 'Hoje' : p === 'week' ? 'Semana' : p === 'month' ? 'Mês' : 'Geral'}</button>))}</div><RankingList matches={matchesList} users={usersList} period={period} onSelectPlayer={setSelectedPlayerStats} /><button onClick={() => setView(user ? 'newMatch' : 'auth')} className="fixed bottom-20 right-4 md:bottom-8 md:right-8 bg-emerald-500 hover:bg-emerald-400 text-white rounded-full p-4 shadow-2xl shadow-emerald-500/30 transition-transform hover:scale-110 z-50 group"><PlusCircle className="w-8 h-8" /></button></>)}
+        
         {view === 'newMatch' && user && (<div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-xl relative"><button onClick={() => setView('dashboard')} className="absolute top-4 right-4 text-slate-400 hover:text-white"><XCircle /></button><NewMatch users={usersList} currentUser={user} isAdmin={isAdmin} onClose={() => setView('dashboard')} onSuccess={(id, status) => { if (status === 'pending_guest') setPendingConfirmationMatchId(id); else { setView('dashboard'); alert(status === 'confirmed' ? 'Partida registrada!' : 'Partida enviada para confirmação!'); } }} /></div>)}
-        {view === 'history' && (<div className="space-y-4"><h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><History className="text-cyan-400" /> Histórico Recente</h2>{matchesList.slice(0, 20).map(m => (<div key={m.id} className="bg-slate-800 p-4 rounded-lg border border-slate-700 flex flex-col gap-2"><div className="flex justify-between items-center"><div className="flex flex-col"><span className="text-slate-300 font-bold">{m.p1Name} <span className="text-emerald-400">{m.s1}</span></span><span className="text-slate-300 font-bold">{m.p2Name} <span className="text-emerald-400">{m.s2}</span></span><span className="text-xs text-slate-500 mt-1">{m.createdAt?.toDate().toLocaleDateString()} - {m.status === 'confirmed' ? 'Confirmado' : 'Pendente'}</span></div>{m.status === 'confirmed' && <CheckCircle className="text-emerald-500/20 w-6 h-6" />}{m.status !== 'confirmed' && <History className="text-amber-500/50 w-6 h-6 animate-pulse" />}</div>{/* AÇÕES PARA JOGOS PENDENTES OU SE FOR ADMIN EM JOGOS CONFIRMADOS */}{(m.status !== 'confirmed' || isAdmin) && user && (<div className="flex gap-2 justify-end mt-2 border-t border-slate-700 pt-2 flex-wrap">{m.createdBy === user.uid && m.p2Id.startsWith('guest_') && (<button onClick={() => setPendingConfirmationMatchId(m.id)} className="text-xs bg-slate-700 text-white px-3 py-1 rounded border border-slate-600 flex items-center gap-1 hover:bg-slate-600"><QrCode className="w-3 h-3" /> Ver QR Code</button>)}{m.createdBy === user.uid && (<button onClick={() => handleDeleteMatch(m.id)} className="text-xs bg-red-900/20 text-red-400 px-3 py-1 rounded border border-red-900/50 flex items-center gap-1 hover:bg-red-900/40"><Trash2 className="w-3 h-3" /> Cancelar</button>)}{m.p2Id === user.uid && (<button onClick={() => handleP2Confirm(m.id)} className="text-xs bg-emerald-900/20 text-emerald-400 px-3 py-1 rounded border border-emerald-900/50 flex items-center gap-1 hover:bg-emerald-900/40"><Check className="w-3 h-3" /> Confirmar</button>)}{isAdmin && (<><button onClick={() => handleForceConfirm(m.id)} className="text-xs bg-amber-900/20 text-amber-400 px-3 py-1 rounded border border-amber-900/50 flex items-center gap-1 hover:bg-amber-900/40"><Check className="w-3 h-3" /> Validar</button><button onClick={() => handleDeleteMatch(m.id)} className="text-xs bg-red-900/20 text-red-400 px-3 py-1 rounded border border-red-900/50 flex items-center gap-1 hover:bg-red-900/40"><Trash2 className="w-3 h-3" /> Excluir</button></>)}</div>)}</div>))}</div>)}
+        
+        {/* VIEW HISTÓRICO ATUALIZADA */}
+        {view === 'history' && (
+            <div className="space-y-4">
+                <div className="flex items-center justify-between mb-2">
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2"><History className="text-cyan-400" /> Histórico</h2>
+                </div>
+                
+                {/* FILTROS DE HISTÓRICO */}
+                <div className="flex gap-2 mb-4 bg-slate-800 p-2 rounded-xl border border-slate-700">
+                    <div className="relative flex-1">
+                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500"/>
+                        <input 
+                            className="w-full bg-slate-900 border border-slate-600 rounded-lg py-2 pl-9 pr-2 text-sm text-white focus:border-emerald-500 outline-none placeholder-slate-500" 
+                            placeholder="Buscar jogador..." 
+                            value={historySearch} 
+                            onChange={e => setHistorySearch(e.target.value)} 
+                        />
+                    </div>
+                    <div className="relative">
+                        <Calendar className="absolute left-3 top-2.5 w-4 h-4 text-slate-500 pointer-events-none"/>
+                        <input 
+                            type="date" 
+                            className="bg-slate-900 border border-slate-600 rounded-lg py-2 pl-9 pr-2 text-sm text-white focus:border-emerald-500 outline-none appearance-none" 
+                            value={historyDate} 
+                            onChange={e => setHistoryDate(e.target.value)} 
+                        />
+                    </div>
+                </div>
+
+                {/* LISTA DE PARTIDAS FILTRADA */}
+                {filteredHistory.length === 0 ? (
+                    <div className="text-center py-10 text-slate-500">
+                        <p>Nenhuma partida encontrada para esta data.</p>
+                        <button onClick={() => setHistoryDate('')} className="text-emerald-400 text-sm mt-2 hover:underline">Ver todo o histórico</button>
+                    </div>
+                ) : (
+                    filteredHistory.map(m => (
+                        <div key={m.id} className="bg-slate-800 p-4 rounded-lg border border-slate-700 flex flex-col gap-2">
+                            <div className="flex justify-between items-center">
+                                <div className="flex flex-col">
+                                    <span className="text-slate-300 font-bold">{m.p1Name} <span className="text-emerald-400">{m.s1}</span></span>
+                                    <span className="text-slate-300 font-bold">{m.p2Name} <span className="text-emerald-400">{m.s2}</span></span>
+                                    <span className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                                        <Clock className="w-3 h-3" /> 
+                                        {m.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 
+                                        <span className="mx-1">•</span>
+                                        {m.status === 'confirmed' ? 'Confirmado' : 'Pendente'}
+                                    </span>
+                                </div>
+                                {m.status === 'confirmed' && <CheckCircle className="text-emerald-500/20 w-6 h-6" />}
+                                {m.status !== 'confirmed' && <History className="text-amber-500/50 w-6 h-6 animate-pulse" />}
+                            </div>
+                            
+                            {m.isChilena && <div className="flex justify-center"><span className="text-[10px] text-yellow-400 font-bold flex items-center gap-1 bg-yellow-500/10 px-2 py-0.5 rounded border border-yellow-500/30"><Zap className="w-3 h-3" fill="currentColor" /> CHILENA APLICADA</span></div>}
+                            
+                            {(m.status !== 'confirmed' || isAdmin) && user && (
+                                <div className="flex gap-2 justify-end mt-2 border-t border-slate-700 pt-2 flex-wrap">
+                                    {m.createdBy === user.uid && m.p2Id.startsWith('guest_') && (<button onClick={() => setPendingConfirmationMatchId(m.id)} className="text-xs bg-slate-700 text-white px-3 py-1 rounded border border-slate-600 flex items-center gap-1 hover:bg-slate-600"><QrCode className="w-3 h-3" /> Ver QR Code</button>)}
+                                    {m.createdBy === user.uid && (<button onClick={() => handleDeleteMatch(m.id)} className="text-xs bg-red-900/20 text-red-400 px-3 py-1 rounded border border-red-900/50 flex items-center gap-1 hover:bg-red-900/40"><Trash2 className="w-3 h-3" /> Cancelar</button>)}
+                                    {m.p2Id === user.uid && (<button onClick={() => handleP2Confirm(m.id)} className="text-xs bg-emerald-900/20 text-emerald-400 px-3 py-1 rounded border border-emerald-900/50 flex items-center gap-1 hover:bg-emerald-900/40"><Check className="w-3 h-3" /> Confirmar</button>)}
+                                    {isAdmin && (<><button onClick={() => handleForceConfirm(m.id)} className="text-xs bg-amber-900/20 text-amber-400 px-3 py-1 rounded border border-amber-900/50 flex items-center gap-1 hover:bg-amber-900/40"><Check className="w-3 h-3" /> Validar</button><button onClick={() => handleDeleteMatch(m.id)} className="text-xs bg-red-900/20 text-red-400 px-3 py-1 rounded border border-red-900/50 flex items-center gap-1 hover:bg-red-900/40"><Trash2 className="w-3 h-3" /> Excluir</button></>)}
+                                </div>
+                            )}
+                        </div>
+                    ))
+                )}
+            </div>
+        )}
+
         {view === 'fines' && <FinesScreen users={usersList} isAdmin={isAdmin} onOpenTransaction={openTransaction} />}
         {view === 'admin' && isAdmin && <AdminPanel users={usersList} onOpenTransaction={openTransaction} />}
       </main>
