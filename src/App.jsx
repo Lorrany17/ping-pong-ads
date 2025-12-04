@@ -18,12 +18,12 @@ import {
   onSnapshot, 
   doc, 
   updateDoc, 
-  serverTimestamp,
-  orderBy,
-  getDoc,
-  setDoc,
-  deleteDoc,
-  getDocs,
+  serverTimestamp, 
+  orderBy, 
+  getDoc, 
+  setDoc, 
+  deleteDoc, 
+  getDocs, 
   writeBatch
 } from 'firebase/firestore';
 import { 
@@ -36,30 +36,29 @@ import {
   LogOut, 
   LogIn, 
   Gavel, 
-  History,
-  UserPlus,
-  Trash2,
-  Check,
-  Save,
-  Edit2,
-  RefreshCw,
-  Camera,
-  Eye,
-  Banknote,
-  ChevronDown,
-  ChevronUp,
-  Receipt,
-  MinusCircle,
-  Search,
-  Minus,
-  Plus,
-  Bell,
-  Globe,
-  TrendingUp,
-  Zap,
-  Calendar,
+  History, 
+  UserPlus, 
+  Trash2, 
+  Check, 
+  Save, 
+  Edit2, 
+  RefreshCw, 
+  Camera, 
+  Eye, 
+  EyeOff, 
+  Banknote, 
+  ChevronDown, 
+  ChevronUp, 
+  Receipt, 
+  MinusCircle, 
+  Search, 
+  Minus, 
+  Plus, 
+  TrendingUp, 
+  Zap, 
+  Calendar, 
   Clock,
-  BarChart3
+  Globe
 } from 'lucide-react';
 
 // --- CONFIGURAÇÃO DO FIREBASE ---
@@ -74,12 +73,14 @@ const firebaseConfig = {
 
 // --- CONFIGURAÇÕES DO GRUPO ---
 const ADMIN_EMAILS = ['santoslorrany250@gmail.com', 'yurikauanim@gmail.com', 'velosofrancivaldo5@gmail.com']; 
-const FINE_PRICE_PLAYER = 5.00; 
-const FINE_PRICE_OWNER = 4.00; 
 
-// --- REGRAS DE BANIMENTO (VIDAS) ---
-const BAN_THRESHOLD_OWNER = 3;
-const BAN_THRESHOLD_PLAYER = 1;
+// --- CONFIGURAÇÃO PADRÃO (FALLBACK) ---
+const DEFAULT_CONFIG = {
+  finePricePlayer: 5.00,
+  finePriceOwner: 4.00,
+  banThresholdPlayer: 1,
+  banThresholdOwner: 3
+};
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -92,11 +93,27 @@ const AVATARS = ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨',
 
 const getRandomAvatar = () => AVATARS[Math.floor(Math.random() * AVATARS.length)];
 
-// --- FUNÇÃO AUXILIAR DE BANIMENTO ---
-const isPlayerBanned = (user) => {
+// --- HELPERS DE TEMPORADA ---
+const getCurrentSeasonId = () => new Date().toISOString().slice(0, 7); // Ex: "2025-12"
+
+const getSeasonOptions = () => {
+    const options = [{ value: 'legacy', label: '📂 Arquivo Morto (Antigos)' }];
+    const date = new Date();
+    for (let i = 0; i < 6; i++) {
+        const value = date.toISOString().slice(0, 7);
+        const label = date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+        const formattedLabel = label.charAt(0).toUpperCase() + label.slice(1);
+        options.push({ value, label: formattedLabel });
+        date.setMonth(date.getMonth() - 1);
+    }
+    return options;
+};
+
+// --- NOVA FUNÇÃO DE BANIMENTO ---
+const isPlayerBanned = (user, config = DEFAULT_CONFIG) => {
     if (!user) return false;
     const fines = user.fines || 0;
-    const threshold = user.isOwner ? BAN_THRESHOLD_OWNER : BAN_THRESHOLD_PLAYER;
+    const threshold = user.isOwner ? Number(config.banThresholdOwner) : Number(config.banThresholdPlayer);
     return fines >= threshold;
 };
 
@@ -156,11 +173,33 @@ const AvatarDisplay = ({ avatar, size = "md", className = "" }) => {
     );
 };
 
-// --- MODAL DE ESTATÍSTICAS DETALHADAS (ATUALIZADO) ---
+const SeasonSelector = ({ current, onChange }) => {
+    const options = getSeasonOptions();
+    // Encontrar o label atual para exibir se não estiver na lista (ex: mês futuro)
+    const currentLabel = options.find(o => o.value === current)?.label || current;
+
+    return (
+        <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-lg border border-slate-700 mb-4 shadow-sm relative">
+            <Calendar className="text-emerald-400 w-5 h-5 absolute left-3 pointer-events-none" />
+            <select 
+                value={current}
+                onChange={(e) => onChange(e.target.value)}
+                className="bg-transparent text-white text-sm font-bold outline-none w-full cursor-pointer pl-8 appearance-none py-1"
+            >
+                {options.map(opt => (
+                    <option key={opt.value} value={opt.value} className="bg-slate-800 text-white">
+                        {opt.label}
+                    </option>
+                ))}
+            </select>
+            <ChevronDown className="text-slate-500 w-4 h-4 absolute right-3 pointer-events-none" />
+        </div>
+    );
+};
+
 const PlayerStatsModal = ({ player, onClose }) => {
     if (!player) return null;
-
-    const netScore = player.wins - player.losses; // Saldo de Vitórias
+    const netScore = player.wins - player.losses;
     const winRate = player.games > 0 ? Math.round((player.wins / player.games) * 100) : 0;
 
     return (
@@ -189,9 +228,7 @@ const PlayerStatsModal = ({ player, onClose }) => {
                     </div>
                     <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700 text-center">
                         <span className="text-xs text-slate-400 font-bold uppercase">Aproveitamento</span>
-                        <div className="text-2xl font-black text-white">
-                            {winRate}%
-                        </div>
+                        <div className="text-2xl font-black text-white">{winRate}%</div>
                         <span className="text-[10px] text-slate-500">{player.wins}V / {player.losses}D</span>
                     </div>
                 </div>
@@ -216,7 +253,6 @@ const PlayerStatsModal = ({ player, onClose }) => {
                         </span>
                     </div>
                     
-                    {/* SEÇÃO NOVA: CHILENAS */}
                     <div className="grid grid-cols-2 gap-2 mt-2">
                          <div className="bg-slate-700/30 p-3 rounded-lg flex flex-col items-center text-center">
                             <span className="text-[10px] text-slate-400 mb-1 flex items-center gap-1"><Zap className="w-3 h-3 text-yellow-400" fill="currentColor" /> Chilenas Dadas</span>
@@ -233,7 +269,6 @@ const PlayerStatsModal = ({ player, onClose }) => {
     );
 };
 
-// --- MODAL DE SELEÇÃO E CRIAÇÃO RÁPIDA ---
 const UserSelectModal = ({ users, onClose, onSelect }) => {
     const [search, setSearch] = useState('');
     const filtered = users.filter(u => u.displayName.toLowerCase().includes(search.toLowerCase()));
@@ -313,7 +348,6 @@ const UserSelectModal = ({ users, onClose, onSelect }) => {
     );
 };
 
-// --- TELA DE AUTH ---
 const AuthScreen = ({ onCancel, onLoginSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [showReset, setShowReset] = useState(false); 
@@ -322,7 +356,7 @@ const AuthScreen = ({ onCancel, onLoginSuccess }) => {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false); // Estado para ver senha
+  const [showPassword, setShowPassword] = useState(false); 
 
   const migrateOfflineUser = async (newUserUid, userEmail) => {
     try {
@@ -414,7 +448,6 @@ const AuthScreen = ({ onCancel, onLoginSuccess }) => {
           {!isLogin && (<div><label className="block text-sm font-medium text-slate-300 mb-1">Nome</label><input type="text" required className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" value={name} onChange={(e) => setName(e.target.value)} /></div>)}
           <div><label className="block text-sm font-medium text-slate-300 mb-1">Email</label><input type="email" required className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
           
-          {/* CAMPO DE SENHA COM TOGGLE */}
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">Senha</label>
             <div className="relative">
@@ -503,7 +536,68 @@ const ProfileModal = ({ user, userDoc, onClose }) => {
     );
 };
 
-const TransactionModal = ({ user, action, onClose }) => {
+const SettingsModal = ({ config, onClose }) => {
+    const [values, setValues] = useState({
+        finePricePlayer: config.finePricePlayer,
+        finePriceOwner: config.finePriceOwner,
+        banThresholdPlayer: config.banThresholdPlayer,
+        banThresholdOwner: config.banThresholdOwner
+    });
+    const [loading, setLoading] = useState(false);
+
+    const handleChange = (field, val) => setValues(prev => ({ ...prev, [field]: val }));
+
+    const handleSave = async () => {
+        setLoading(true);
+        try {
+            const cleanValues = {
+                finePricePlayer: parseFloat(values.finePricePlayer),
+                finePriceOwner: parseFloat(values.finePriceOwner),
+                banThresholdPlayer: parseInt(values.banThresholdPlayer),
+                banThresholdOwner: parseInt(values.banThresholdOwner)
+            };
+            await setDoc(doc(db, getCollectionPath('settings'), 'global'), cleanValues);
+            alert('✅ Regras atualizadas com sucesso!');
+            onClose();
+        } catch (e) { 
+            console.error(e);
+            alert('Erro: ' + e.message); 
+        } finally { 
+            setLoading(false); 
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-800 w-full max-w-sm rounded-2xl p-6 border border-slate-700 shadow-2xl animate-in zoom-in-95">
+                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Gavel className="text-amber-400"/> Regras do Jogo</h2>
+                
+                <div className="space-y-4">
+                    <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                        <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Preço das Multas (R$)</h3>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div><label className="text-[10px] text-slate-500">JOGADOR</label><input type="number" step="0.5" className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white font-bold" value={values.finePricePlayer} onChange={e => handleChange('finePricePlayer', e.target.value)} /></div>
+                            <div><label className="text-[10px] text-slate-500">DONO</label><input type="number" step="0.5" className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white font-bold" value={values.finePriceOwner} onChange={e => handleChange('finePriceOwner', e.target.value)} /></div>
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                        <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Limite de Banimento (Infrações)</h3>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div><label className="text-[10px] text-slate-500">JOGADOR</label><input type="number" className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white font-bold" value={values.banThresholdPlayer} onChange={e => handleChange('banThresholdPlayer', e.target.value)} /></div>
+                            <div><label className="text-[10px] text-slate-500">DONO</label><input type="number" className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white font-bold" value={values.banThresholdOwner} onChange={e => handleChange('banThresholdOwner', e.target.value)} /></div>
+                        </div>
+                    </div>
+
+                    <button onClick={handleSave} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl shadow-lg mt-2">{loading ? 'Salvando...' : 'Salvar Regras'}</button>
+                    <button onClick={onClose} className="w-full text-slate-400 py-2 hover:text-white">Cancelar</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const TransactionModal = ({ user, action, onClose, config }) => {
     const [amount, setAmount] = useState('');
     const [description, setDescription] = useState('');
     const [finesToClear, setFinesToClear] = useState(1); 
@@ -511,14 +605,15 @@ const TransactionModal = ({ user, action, onClose }) => {
 
     useEffect(() => {
         if (action === 'fine') {
-            setAmount(user.isOwner ? FINE_PRICE_OWNER.toFixed(2) : FINE_PRICE_PLAYER.toFixed(2));
+            const price = user.isOwner ? config.finePriceOwner : config.finePricePlayer;
+            setAmount(Number(price).toFixed(2));
             setDescription('Infração');
         } else {
             setAmount(user.balance > 0 ? user.balance.toFixed(2) : '');
             setDescription('Pagamento');
             setFinesToClear(1);
         }
-    }, [action, user]);
+    }, [action, user, config]);
 
     const handleSave = async () => {
         if (!amount || isNaN(amount) || amount <= 0) return alert('Valor inválido');
@@ -566,7 +661,6 @@ const TransactionModal = ({ user, action, onClose }) => {
                     <div>
                         <label className="text-xs font-bold text-slate-400">VALOR (R$)</label>
                         <input type="number" step="0.50" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white mt-1 text-lg font-bold" value={amount} onChange={e => setAmount(e.target.value)} />
-                        {action === 'fine' && <p className="text-[10px] text-slate-500 mt-1">Edite se for um valor especial.</p>}
                     </div>
                     {action === 'payment' && (
                         <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
@@ -614,64 +708,81 @@ const FinesScreen = ({ users, isAdmin, onOpenTransaction }) => {
     );
 };
 
-// --- MODIFICADO: RANKING LIST PARA CALCULAR CHILENAS ---
-const RankingList = ({ matches, users, period, onSelectPlayer }) => {
+// --- RANKING LIST (COM RECUPERAÇÃO INTELIGENTE DE DADOS) ---
+const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
   const ranking = useMemo(() => {
     const stats = {};
+    const nameToUid = {}; 
+
     users.forEach(u => { 
         stats[u.uid] = { 
             ...u, 
-            wins: 0, 
-            losses: 0, 
-            games: 0, 
-            pointsScored: 0, 
-            pointsConceded: 0, 
-            pointDiff: 0,
-            chilenasGiven: 0,     // NOVO
-            chilenasReceived: 0   // NOVO
-        }; 
+            wins: 0, losses: 0, games: 0, 
+            pointsScored: 0, pointsConceded: 0, pointDiff: 0,
+            chilenasGiven: 0, chilenasReceived: 0   
+        };
+        if (u.displayName) nameToUid[u.displayName.toLowerCase().trim()] = u.uid;
     });
     
     matches.forEach(m => {
-      if (m.status !== 'confirmed' || !m.createdAt || !dateFilters[period](m.createdAt.toDate())) return;
+      const isConfirmed = m.status === 'confirmed' || m.status === undefined || m.status === null;
+      if (!isConfirmed) return; 
+
+      if (period !== 'all') {
+          if (!m.createdAt) return; 
+          if (!dateFilters[period](m.createdAt.toDate())) return; 
+      }
+
       const s1 = Number(m.s1 || 0);
       const s2 = Number(m.s2 || 0);
 
-      if (stats[m.p1Id]) { 
-          stats[m.p1Id].games++; 
-          stats[m.p1Id].pointsScored += s1;
-          stats[m.p1Id].pointsConceded += s2;
-          stats[m.p1Id].pointDiff += (s1 - s2);
+      let p1Id = m.p1Id;
+      if (!stats[p1Id] && m.p1Name) {
+          const recoveredId = nameToUid[m.p1Name.toLowerCase().trim()];
+          if (recoveredId) p1Id = recoveredId;
+      }
+
+      let p2Id = m.p2Id;
+      if (p2Id && !stats[p2Id] && m.p2Name) {
+          const recoveredId = nameToUid[m.p2Name.toLowerCase().trim()];
+          if (recoveredId) p2Id = recoveredId;
+      }
+
+      if (stats[p1Id]) { 
+          stats[p1Id].games++; 
+          stats[p1Id].pointsScored += s1;
+          stats[p1Id].pointsConceded += s2;
+          stats[p1Id].pointDiff += (s1 - s2);
           if (s1 > s2) {
-              stats[m.p1Id].wins++; 
-              if (m.isChilena) stats[m.p1Id].chilenasGiven++; // P1 deu chilena
+              stats[p1Id].wins++; 
+              if (m.isChilena) stats[p1Id].chilenasGiven++; 
           } else {
-              stats[m.p1Id].losses++; 
-              if (m.isChilena) stats[m.p1Id].chilenasReceived++; // P1 levou chilena
+              stats[p1Id].losses++; 
+              if (m.isChilena) stats[p1Id].chilenasReceived++; 
           }
       }
-      if (m.p2Id && stats[m.p2Id]) { 
-            stats[m.p2Id].games++; 
-            stats[m.p2Id].pointsScored += s2;
-            stats[m.p2Id].pointsConceded += s1;
-            stats[m.p2Id].pointDiff += (s2 - s1);
+
+      if (p2Id && stats[p2Id]) { 
+            stats[p2Id].games++; 
+            stats[p2Id].pointsScored += s2;
+            stats[p2Id].pointsConceded += s1;
+            stats[p2Id].pointDiff += (s2 - s1);
             if (s2 > s1) {
-                stats[m.p2Id].wins++; 
-                if (m.isChilena) stats[m.p2Id].chilenasGiven++; // P2 deu chilena
+                stats[p2Id].wins++; 
+                if (m.isChilena) stats[p2Id].chilenasGiven++; 
             } else {
-                stats[m.p2Id].losses++; 
-                if (m.isChilena) stats[m.p2Id].chilenasReceived++; // P2 levou chilena
+                stats[p2Id].losses++; 
+                if (m.isChilena) stats[p2Id].chilenasReceived++; 
             }
       }
     });
     
-    // NOVA LÓGICA: Classificar por saldo (Vitórias - Derrotas)
     return Object.values(stats).filter(p => p.games > 0 || p.fines > 0).sort((a, b) => {
-        const scoreA = a.wins - a.losses;
-        const scoreB = b.wins - b.losses;
-        if (scoreB !== scoreA) return scoreB - scoreA;
-        if (b.wins !== a.wins) return b.wins - a.wins; // Desempate 1: Quem tem mais vitórias
-        return b.pointDiff - a.pointDiff; // Desempate 2: Saldo de pontos
+      const scoreA = a.wins - a.losses;
+      const scoreB = b.wins - b.losses;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      if (b.wins !== a.wins) return b.wins - a.wins; 
+      return b.pointDiff - a.pointDiff; 
     });
   }, [matches, users, period]);
 
@@ -680,13 +791,13 @@ const RankingList = ({ matches, users, period, onSelectPlayer }) => {
   return (
     <div className="space-y-3">
       {ranking.map((player, index) => {
-        const isBanned = isPlayerBanned(player);
+        const isBanned = isPlayerBanned(player, config);
         const netScore = player.wins - player.losses;
 
         return (
           <div 
             key={player.uid} 
-            onClick={() => onSelectPlayer(player)} // Clique para ver detalhes
+            onClick={() => onSelectPlayer(player)} 
             className={`relative flex items-center p-4 rounded-xl border cursor-pointer transition-colors hover:bg-slate-700/50 ${isBanned ? 'bg-red-900/20 border-red-800' : 'bg-slate-800 border-slate-700'} shadow-sm`}
           >
             <div className="flex-shrink-0 w-8 text-center font-bold text-slate-400 text-xl">#{index + 1}</div>
@@ -699,7 +810,6 @@ const RankingList = ({ matches, users, period, onSelectPlayer }) => {
               <p className="text-sm text-slate-400">{player.wins}V • {player.losses}D <span className="text-xs text-slate-500">({player.games} jogos)</span></p>
             </div>
             <div className="text-right">
-                {/* PONTUAÇÃO PRINCIPAL (SALDO DE VITÓRIAS) */}
                 <span className={`block text-xl font-bold ${netScore >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                     {netScore > 0 ? '+' : ''}{netScore}
                 </span>
@@ -712,7 +822,8 @@ const RankingList = ({ matches, users, period, onSelectPlayer }) => {
   );
 };
 
-const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
+// --- NEW MATCH (Com Config Dinâmica + Temporadas) ---
+const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess, config }) => {
   const [p1Search, setP1Search] = useState('');
   const [p2Search, setP2Search] = useState('');
   const [selectedP1, setSelectedP1] = useState(users.find(u => u.uid === currentUser.uid));
@@ -726,7 +837,11 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [isChilenaMode, setIsChilenaMode] = useState(false);
 
-  const isUserBanned = selectedP1 && !isGuestP1 && isPlayerBanned(selectedP1);
+  // Calcula o mês atual para salvar no banco
+  const [currentSeasonId] = useState(() => new Date().toISOString().slice(0, 7));
+
+  const isUserBanned = selectedP1 && !isGuestP1 && isPlayerBanned(selectedP1, config);
+  
   if (isUserBanned && !isAdmin) return <div className="p-6 text-center"><AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" /><h2 className="text-xl font-bold text-white mb-2">Suspenso!</h2><button onClick={onClose} className="bg-slate-700 text-white px-4 py-2 rounded-lg">Voltar</button></div>;
 
   const filterUsers = (search, excludeUid) => users.filter(u => (excludeUid ? u.uid !== excludeUid : true) && u.displayName.toLowerCase().includes(search.toLowerCase()));
@@ -734,7 +849,7 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
   const UserOption = ({ user, onClick }) => (
       <button type="button" onClick={onClick} className="w-full text-left px-4 py-3 hover:bg-slate-700 text-slate-200 border-b border-slate-700/50 flex items-center justify-between">
         <div className="flex items-center gap-3"><AvatarDisplay avatar={user.avatar} size="sm" /><div><span className="block font-bold">{user.displayName}</span><span className="text-[10px] text-slate-400">{user.isOffline ? 'Sem Conta' : user.email}</span></div></div>
-        {isPlayerBanned(user) && <span className="text-xs text-red-400 border border-red-500/30 px-1 rounded">Suspenso</span>}
+        {isPlayerBanned(user, config) && <span className="text-xs text-red-400 border border-red-500/30 px-1 rounded">Suspenso</span>}
       </button>
   );
 
@@ -747,7 +862,12 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
 
     setLoading(true);
     try {
-      const matchData = { createdAt: serverTimestamp(), createdBy: currentUser.uid, isChilena: isChilenaSubmit };
+      const matchData = { 
+          createdAt: serverTimestamp(), 
+          createdBy: currentUser.uid, 
+          isChilena: isChilenaSubmit,
+          seasonId: currentSeasonId // Salva o Mês atual
+      };
 
       if (isGuestP1) { matchData.p1Name = guestNameP1 || 'Convidado 1'; matchData.p1Id = 'guest_' + Date.now() + '_1'; } 
       else { matchData.p1Name = selectedP1.displayName; matchData.p1Id = selectedP1.uid; }
@@ -763,7 +883,6 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
           matchData.s2 = parseInt(score2);
       }
 
-      // Lógica de Confirmação
       let newStatus = 'pending_user';
       let confBy = null;
       let confAt = null;
@@ -774,7 +893,7 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
           if ((selectedP2 && !selectedP2.isOffline && !isGuestP2)) {
               newStatus = 'pending_user'; 
           } else {
-              newStatus = 'pending_guest'; // Exige scan do QR Code
+              newStatus = 'pending_guest'; 
           }
       }
 
@@ -787,7 +906,6 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess }) => {
     } catch (err) { alert('Erro: ' + err.message); setLoading(false); }
   };
 
-  // Apenas para controle visual do botão
   const isAutoConfirmButton = isAdmin;
 
   return (
@@ -938,79 +1056,117 @@ const ConfirmMatchScreen = ({ matchId, currentUser, onComplete }) => {
   );
 };
 
-const AdminPanel = ({ users, onOpenTransaction }) => {
-  const [newOfflineName, setNewOfflineName] = useState('');
-  const [newOfflineEmail, setNewOfflineEmail] = useState('');
-  const [editingUserId, setEditingUserId] = useState(null);
-  const [editName, setEditName] = useState('');
-  const [editEmail, setEditEmail] = useState('');
+const AdminPanel = ({ users, onOpenTransaction, config }) => { 
+    const [newOfflineName, setNewOfflineName] = useState('');
+    const [newOfflineEmail, setNewOfflineEmail] = useState('');
+    const [editingUserId, setEditingUserId] = useState(null);
+    const [editName, setEditName] = useState('');
+    const [editEmail, setEditEmail] = useState('');
+    const [adminSearch, setAdminSearch] = useState('');
+    const [filterType, setFilterType] = useState('all'); 
+    const [showSettings, setShowSettings] = useState(false);
 
-  const handleUpdateUser = async (uid, data) => { try { await updateDoc(doc(db, getCollectionPath('users'), uid), data); } catch (e) { alert('Erro: ' + e.message); } };
-  const handleDeleteOffline = async (uid) => { if(window.confirm('Tem certeza?')) await deleteDoc(doc(db, getCollectionPath('users'), uid)); };
+    const handleUpdateUser = async (uid, data) => { try { await updateDoc(doc(db, getCollectionPath('users'), uid), data); } catch (e) { alert('Erro: ' + e.message); } };
+    const handleDeleteOffline = async (uid) => { if(window.confirm('Tem certeza?')) await deleteDoc(doc(db, getCollectionPath('users'), uid)); };
 
-  const addOfflinePlayer = async (e) => {
-    e.preventDefault();
-    if (!newOfflineName.trim()) return;
-    try {
-        const fakeUid = 'offline_' + Date.now();
-        await setDoc(doc(db, getCollectionPath('users'), fakeUid), {
-          uid: fakeUid, displayName: newOfflineName, email: newOfflineEmail.trim() || `offline_${Date.now()}@noemail.com`,
-          isOwner: false, isOffline: true, fines: 0, balance: 0, role: 'user', avatar: getRandomAvatar(), createdAt: serverTimestamp()
-        });
-        setNewOfflineName(''); setNewOfflineEmail(''); alert('Jogador adicionado!');
-    } catch (err) { alert('Erro: ' + err.message); }
-  };
+    const addOfflinePlayer = async (e) => {
+        e.preventDefault();
+        if (!newOfflineName.trim()) return;
+        try {
+            const fakeUid = 'offline_' + Date.now();
+            await setDoc(doc(db, getCollectionPath('users'), fakeUid), {
+                uid: fakeUid, displayName: newOfflineName, email: newOfflineEmail.trim() || `offline_${Date.now()}@noemail.com`,
+                isOwner: false, isOffline: true, fines: 0, balance: 0, role: 'user', avatar: getRandomAvatar(), createdAt: serverTimestamp()
+            });
+            setNewOfflineName(''); setNewOfflineEmail(''); alert('Jogador adicionado!');
+        } catch (err) { alert('Erro: ' + err.message); }
+    };
 
-  const startEditing = (user) => { setEditingUserId(user.uid); setEditName(user.displayName); setEditEmail(user.email); };
-  const cancelEditing = () => { setEditingUserId(null); setEditName(''); setEditEmail(''); };
-  const saveEdit = async (uid) => { if(!editName.trim() || !editEmail.trim()) return alert('Preencha os campos!'); await handleUpdateUser(uid, { displayName: editName, email: editEmail.trim() }); setEditingUserId(null); };
+    const startEditing = (user) => { setEditingUserId(user.uid); setEditName(user.displayName); setEditEmail(user.email); };
+    const cancelEditing = () => { setEditingUserId(null); setEditName(''); setEditEmail(''); };
+    const saveEdit = async (uid) => { if(!editName.trim() || !editEmail.trim()) return alert('Preencha os campos!'); await handleUpdateUser(uid, { displayName: editName, email: editEmail.trim() }); setEditingUserId(null); };
 
-  return (
-    <div className="space-y-6">
-      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Gavel className="text-amber-400" /> Painel do Juiz</h2>
-      <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-        <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><UserPlus className="w-4 h-4" /> Cadastrar Sem Conta</h3>
-        <form onSubmit={addOfflinePlayer} className="flex flex-col gap-2">
-            <div className="flex flex-col sm:flex-row gap-2">
-                <input type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineName} onChange={(e) => setNewOfflineName(e.target.value)} required />
-                <input type="email" placeholder="E-mail real (opcional)" className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineEmail} onChange={(e) => setNewOfflineEmail(e.target.value)} />
-            </div>
-            <button className="bg-slate-700 text-white px-3 py-2 rounded text-xs font-bold w-full">Adicionar & Reservar E-mail</button>
-        </form>
-      </div>
-      <div className="space-y-2">
-        {users.map(user => (
-          <div key={user.uid} className={`p-4 rounded-lg border flex flex-col gap-3 ${user.isOffline ? 'bg-slate-800/50 border-slate-700 border-dashed' : 'bg-slate-800 border-slate-700'}`}>
-            <div className="flex justify-between items-start">
-              <div className="flex-1">
-                {editingUserId === user.uid ? (
-                    <div className="flex flex-col gap-2 mb-2">
-                        <input className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white" value={editName} onChange={e => setEditName(e.target.value)} placeholder="Nome" />
-                        <input className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white" value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Email" />
-                        <div className="flex gap-2"><button onClick={() => saveEdit(user.uid)} className="bg-emerald-600 text-white px-2 py-1 rounded text-xs flex items-center gap-1"><Save className="w-3 h-3" /> Salvar</button><button onClick={cancelEditing} className="bg-slate-600 text-white px-2 py-1 rounded text-xs flex items-center gap-1"><XCircle className="w-3 h-3" /> Cancelar</button></div>
-                    </div>
-                ) : (
-                    <>
-                        <p className="font-bold text-white flex items-center gap-2"><AvatarDisplay avatar={user.avatar} size="sm" />{user.displayName}{user.isOffline && <span className="text-[10px] bg-slate-600 px-1 rounded text-slate-300">OFFLINE</span>}{user.isOffline && (<button onClick={() => startEditing(user)} className="text-slate-500 hover:text-white p-1"><Edit2 className="w-3 h-3" /></button>)}</p>
-                        <p className="text-xs text-slate-500 flex items-center gap-1">{user.email}{user.isOffline && user.email.includes('@') && !user.email.includes('noemail.com') && <span className="text-emerald-500">(VINCULADO)</span>}</p>
-                    </>
-                )}
-                <div className="flex gap-2 mt-1">{user.isOwner ? <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1 rounded border border-amber-500/30">DONO DA RAQUETE</span> : <span className="text-[10px] bg-slate-700 text-slate-400 px-1 rounded">JOGADOR</span>}</div>
-              </div>
-              <div className="text-center"><span className={`block text-xl font-bold ${user.fines > 0 ? 'text-red-400' : 'text-slate-600'}`}>{user.fines || 0}</span><span className="text-[10px] text-slate-500">MULTAS</span></div>
-            </div>
-            <div className="grid grid-cols-2 gap-2 mt-2"><button onClick={() => handleUpdateUser(user.uid, { isOwner: !user.isOwner })} className="text-xs bg-slate-700 hover:bg-slate-600 text-white py-2 rounded">{user.isOwner ? 'Remover Dono' : 'Tornar Dono'}</button>{user.isOffline && <button onClick={() => handleDeleteOffline(user.uid)} className="text-xs bg-red-900/20 text-red-400 hover:bg-red-900/40 py-2 rounded flex justify-center items-center gap-1"><Trash2 className="w-3 h-3" /> Apagar</button>}</div>
+    const filteredUsers = users.filter(user => {
+        const term = adminSearch.toLowerCase();
+        const matchesSearch = user.displayName.toLowerCase().includes(term) || (user.email && user.email.toLowerCase().includes(term));
+        if (!matchesSearch) return false;
+        if (filterType === 'debtors') return user.balance > 0;
+        if (filterType === 'banned') return isPlayerBanned(user, config); 
+        if (filterType === 'offline') return user.isOffline;
+        return true;
+    });
+
+    return (
+        <div className="space-y-6">
+            {showSettings && <SettingsModal config={config} onClose={() => setShowSettings(false)} />}
             
-            {/* BOTÕES DE AÇÃO RÁPIDA (INTEGRADOS) */}
-            <div className="grid grid-cols-2 gap-2">
-               <button onClick={() => onOpenTransaction(user, 'fine')} className="text-xs border border-red-500/50 text-red-400 hover:bg-red-900/20 py-2 rounded flex items-center justify-center gap-1 font-bold">+ Multa</button>
-               <button onClick={() => onOpenTransaction(user, 'payment')} className="text-xs bg-emerald-900/30 text-emerald-400 hover:bg-emerald-900/50 py-2 rounded font-bold border border-emerald-800">Pagar</button>
+            <div className="flex justify-between items-center">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2"><Gavel className="text-amber-400" /> Painel do Juiz</h2>
+                <button onClick={() => setShowSettings(true)} className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2 border border-slate-600 shadow-sm">
+                    <Edit2 className="w-4 h-4" /> Regras
+                </button>
             </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+            
+            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><UserPlus className="w-4 h-4" /> Cadastrar Sem Conta</h3>
+                <form onSubmit={addOfflinePlayer} className="flex flex-col gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
+                        <input type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineName} onChange={(e) => setNewOfflineName(e.target.value)} required />
+                        <input type="email" placeholder="E-mail real (opcional)" className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineEmail} onChange={(e) => setNewOfflineEmail(e.target.value)} />
+                    </div>
+                    <button className="bg-slate-700 text-white px-3 py-2 rounded text-xs font-bold w-full hover:bg-slate-600 transition-colors">Adicionar & Reservar E-mail</button>
+                </form>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 items-center bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
+                <div className="relative w-full sm:flex-1">
+                    <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+                    <input className="w-full bg-slate-800 border border-slate-600 rounded-lg py-2 pl-9 pr-2 text-sm text-white focus:border-emerald-500 outline-none placeholder-slate-500" placeholder="Buscar..." value={adminSearch} onChange={e => setAdminSearch(e.target.value)} />
+                </div>
+                <select className="w-full sm:w-auto bg-slate-800 border border-slate-600 rounded-lg py-2 px-3 text-sm text-white outline-none focus:border-emerald-500 cursor-pointer" value={filterType} onChange={e => setFilterType(e.target.value)}>
+                    <option value="all">Todos ({users.length})</option>
+                    <option value="debtors">Devedores 💸</option>
+                    <option value="banned">Banidos 🚫</option>
+                    <option value="offline">Offline 🤖</option>
+                </select>
+            </div>
+
+            <div className="space-y-2">
+                <p className="text-xs text-slate-500 font-bold ml-1 mb-2">Exibindo {filteredUsers.length} jogadores</p>
+                {filteredUsers.length === 0 ? (<div className="text-center py-8 text-slate-500 border border-dashed border-slate-700 rounded-xl">Ninguém encontrado com esses filtros.</div>) : (
+                    filteredUsers.map(user => (
+                        <div key={user.uid} className={`p-4 rounded-lg border flex flex-col gap-3 ${user.isOffline ? 'bg-slate-800/50 border-slate-700 border-dashed' : 'bg-slate-800 border-slate-700'}`}>
+                            <div className="flex justify-between items-start">
+                                <div className="flex-1">
+                                    {editingUserId === user.uid ? (
+                                        <div className="flex flex-col gap-2 mb-2">
+                                            <input className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white" value={editName} onChange={e => setEditName(e.target.value)} />
+                                            <input className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white" value={editEmail} onChange={e => setEditEmail(e.target.value)} />
+                                            <div className="flex gap-2"><button onClick={() => saveEdit(user.uid)} className="bg-emerald-600 text-white px-2 py-1 rounded text-xs flex items-center gap-1">Salvar</button><button onClick={cancelEditing} className="bg-slate-600 text-white px-2 py-1 rounded text-xs flex items-center gap-1">Cancelar</button></div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="font-bold text-white flex items-center gap-2">
+                                                <AvatarDisplay avatar={user.avatar} size="sm" />
+                                                {user.displayName}
+                                                {user.isOffline && <span className="text-[10px] bg-slate-600 px-1 rounded text-slate-300">OFFLINE</span>}
+                                                {user.isOffline && (<button onClick={() => startEditing(user)} className="text-slate-500 hover:text-white p-1"><Edit2 className="w-3 h-3" /></button>)}
+                                            </div>
+                                            <p className="text-xs text-slate-500 flex items-center gap-1">{user.email}{user.isOffline && user.email.includes('@') && !user.email.includes('noemail.com') && <span className="text-emerald-500">(VINCULADO)</span>}</p>
+                                        </>
+                                    )}
+                                    <div className="flex gap-2 mt-1">{user.isOwner ? <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1 rounded border border-amber-500/30">DONO</span> : <span className="text-[10px] bg-slate-700 text-slate-400 px-1 rounded">JOGADOR</span>}</div>
+                                </div>
+                                <div className="text-center"><span className={`block text-xl font-bold ${user.fines > 0 ? 'text-red-400' : 'text-slate-600'}`}>{user.fines || 0}</span><span className="text-[10px] text-slate-500">MULTAS</span></div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 mt-2"><button onClick={() => handleUpdateUser(user.uid, { isOwner: !user.isOwner })} className="text-xs bg-slate-700 hover:bg-slate-600 text-white py-2 rounded">{user.isOwner ? 'Remover Dono' : 'Tornar Dono'}</button>{user.isOffline && <button onClick={() => handleDeleteOffline(user.uid)} className="text-xs bg-red-900/20 text-red-400 hover:bg-red-900/40 py-2 rounded flex justify-center items-center gap-1"><Trash2 className="w-3 h-3" /> Apagar</button>}</div>
+                            <div className="grid grid-cols-2 gap-2"><button onClick={() => onOpenTransaction(user, 'fine')} className="text-xs border border-red-500/50 text-red-400 hover:bg-red-900/20 py-2 rounded flex items-center justify-center gap-1 font-bold">+ Multa</button><button onClick={() => onOpenTransaction(user, 'payment')} className="text-xs bg-emerald-900/30 text-emerald-400 hover:bg-emerald-900/50 py-2 rounded font-bold border border-emerald-800">Pagar</button></div>
+                        </div>
+                    ))
+                )}
+            </div>
+        </div>
+    );
 };
 
 export default function App() {
@@ -1019,33 +1175,87 @@ export default function App() {
   const [view, setView] = useState('dashboard'); 
   const [usersList, setUsersList] = useState([]);
   const [matchesList, setMatchesList] = useState([]);
-  // ESTADO NOVO: Busca e Data no Histórico
+  const [config, setConfig] = useState(DEFAULT_CONFIG);
+
   const [historySearch, setHistorySearch] = useState('');
-  const [historyDate, setHistoryDate] = useState(new Date().toISOString().split('T')[0]); // Padrão: Hoje
+  const [historyDate, setHistoryDate] = useState(new Date().toISOString().split('T')[0]);
   const [period, setPeriod] = useState('all');
   const [pendingConfirmationMatchId, setPendingConfirmationMatchId] = useState(null);
   const [confirmMatchId, setConfirmMatchId] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [showProfile, setShowProfile] = useState(false);
   const [transactionModal, setTransactionModal] = useState(null); 
-  const [selectedPlayerStats, setSelectedPlayerStats] = useState(null); // Estado para modal de stats
+  const [selectedPlayerStats, setSelectedPlayerStats] = useState(null);
+
+  // --- CONTROLE DE TEMPORADAS ---
+  const [currentSeason, setCurrentSeason] = useState(getCurrentSeasonId()); // Padrão: Mês Atual
+
+  useEffect(() => {
+    const unsubConfig = onSnapshot(doc(db, getCollectionPath('settings'), 'global'), (doc) => {
+        if (doc.exists()) {
+            setConfig(prev => ({ ...prev, ...doc.data() })); 
+        }
+    });
+    return () => unsubConfig();
+  }, []);
+
+  // --- CARREGAMENTO DE DADOS (COM FILTRO DE TEMPORADA) ---
+  useEffect(() => {
+    // 1. Carrega Usuários (Global)
+    const unsubUsers = onSnapshot(query(collection(db, getCollectionPath('users'))), (snap) => {
+      const list = []; 
+      snap.forEach(doc => list.push(doc.data())); 
+      setUsersList(list);
+    });
+
+    // 2. Carrega Partidas da Temporada Selecionada
+    let q;
+    const matchesRef = collection(db, getCollectionPath('matches'));
+
+    if (currentSeason === 'legacy') {
+        // Se for "Arquivo Morto", baixamos tudo e filtramos quem NÃO tem seasonId
+        // (Isso é mais leve do que parece, pois são só os jogos antigos)
+        q = matchesRef; 
+    } else {
+        // Se for um Mês específico, usamos query do banco! (Rápido ⚡)
+        q = query(matchesRef, where('seasonId', '==', currentSeason));
+    }
+
+    const unsubMatches = onSnapshot(q, (snap) => {
+      const list = []; 
+      snap.forEach(doc => {
+          const data = doc.data();
+          // Filtro extra no lado do cliente para o Legado
+          if (currentSeason === 'legacy') {
+              if (!data.seasonId) list.push({ id: doc.id, ...data });
+          } else {
+              list.push({ id: doc.id, ...data });
+          }
+      });
+      
+      // Ordenação manual
+      list.sort((a, b) => {
+          const dateA = a.createdAt ? a.createdAt.toDate().getTime() : 0;
+          const dateB = b.createdAt ? b.createdAt.toDate().getTime() : 0;
+          return dateB - dateA;
+      });
+      
+      setMatchesList(list);
+    });
+
+    return () => { unsubUsers(); unsubMatches(); };
+  }, [currentSeason]); // <--- RECARREGA AO MUDAR O MÊS
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const matchId = params.get('confirmMatch');
     if (matchId) setConfirmMatchId(matchId);
-    const unsubscribe = onAuthStateChanged(auth, (u) => { setUser(u); setLoading(false); });
-    return unsubscribe;
-  }, []);
 
-  useEffect(() => {
-    const unsubUsers = onSnapshot(query(collection(db, getCollectionPath('users'))), (snap) => {
-      const list = []; snap.forEach(doc => list.push(doc.data())); setUsersList(list);
+    const unsubscribe = onAuthStateChanged(auth, (u) => { 
+        setUser(u); 
+        setLoading(false); 
     });
-    const unsubMatches = onSnapshot(query(collection(db, getCollectionPath('matches')), orderBy('createdAt', 'desc')), (snap) => {
-      const list = []; snap.forEach(doc => list.push({ id: doc.id, ...doc.data() })); setMatchesList(list);
-    });
-    return () => { unsubUsers(); unsubMatches(); };
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -1065,7 +1275,7 @@ export default function App() {
 
   if (loading) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-emerald-400">Carregando...</div>;
   if (confirmMatchId) return <div className="min-h-screen bg-slate-900 text-slate-100"><ConfirmMatchScreen matchId={confirmMatchId} currentUser={user} onComplete={clearUrl}/></div>;
-  
+   
   if (view === 'auth' && !user) {
       return <AuthScreen onCancel={() => setView('dashboard')} onLoginSuccess={() => setView('dashboard')} />;
   }
@@ -1073,25 +1283,17 @@ export default function App() {
   const isAdmin = user && ADMIN_EMAILS.includes(user.email);
   const currentUserDoc = user ? usersList.find(u => u.uid === user.uid) : null;
 
-  // --- LÓGICA DE FILTRO DO HISTÓRICO ---
   const filteredHistory = matchesList.filter(m => {
       if (!m.createdAt) return false;
-      
-      // 1. Filtro de Data (Padrão: Hoje)
       const matchDate = m.createdAt.toDate();
-      // Ajuste de fuso horário simples: pegar YYYY-MM-DD local
-      const dateStr = matchDate.toLocaleDateString('en-CA'); // Formato YYYY-MM-DD
-      
+      const dateStr = matchDate.toLocaleDateString('en-CA'); 
       if (historyDate && dateStr !== historyDate) return false;
-
-      // 2. Filtro de Busca (Nome)
       if (historySearch) {
           const term = historySearch.toLowerCase();
           const p1 = m.p1Name ? m.p1Name.toLowerCase() : '';
           const p2 = m.p2Name ? m.p2Name.toLowerCase() : '';
           return p1.includes(term) || p2.includes(term);
       }
-
       return true;
   });
 
@@ -1099,7 +1301,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-900 text-slate-100 pb-20 md:pb-0 md:pl-20 relative">
       {pendingConfirmationMatchId && <QrModal matchId={pendingConfirmationMatchId} onClose={() => setPendingConfirmationMatchId(null)} />}
       {showProfile && user && <ProfileModal user={user} userDoc={currentUserDoc} onClose={() => setShowProfile(false)} />}
-      {transactionModal && <TransactionModal user={transactionModal.user} action={transactionModal.action} onClose={() => setTransactionModal(null)} />}
+      {transactionModal && <TransactionModal user={transactionModal.user} action={transactionModal.action} onClose={() => setTransactionModal(null)} config={config} />}
       {selectedPlayerStats && <PlayerStatsModal player={selectedPlayerStats} onClose={() => setSelectedPlayerStats(null)} />}
 
       <header className="bg-slate-800/50 backdrop-blur-md border-b border-slate-700 p-4 sticky top-0 z-20 flex justify-between items-center md:hidden">
@@ -1133,18 +1335,38 @@ export default function App() {
             </div>
         </div>
 
-        {view === 'dashboard' && (<><div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700 overflow-x-auto">{['day', 'week', 'month', 'all'].map((p) => (<button key={p} onClick={() => setPeriod(p)} className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${period === p ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>{p === 'day' ? 'Hoje' : p === 'week' ? 'Semana' : p === 'month' ? 'Mês' : 'Geral'}</button>))}</div><RankingList matches={matchesList} users={usersList} period={period} onSelectPlayer={setSelectedPlayerStats} /><button onClick={() => setView(user ? 'newMatch' : 'auth')} className="fixed bottom-20 right-4 md:bottom-8 md:right-8 bg-emerald-500 hover:bg-emerald-400 text-white rounded-full p-4 shadow-2xl shadow-emerald-500/30 transition-transform hover:scale-110 z-50 group"><PlusCircle className="w-8 h-8" /></button></>)}
+        {view === 'dashboard' && (
+            <>
+                <SeasonSelector current={currentSeason} onChange={setCurrentSeason} />
+                
+                <div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700 overflow-x-auto mb-4">
+                    {['day', 'week', 'month', 'all'].map((p) => (
+                        <button 
+                            key={p} 
+                            onClick={() => setPeriod(p)} 
+                            className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${period === p ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                        >
+                            {p === 'day' ? 'Hoje' : p === 'week' ? 'Semana' : p === 'month' ? 'Mês' : 'Geral'}
+                        </button>
+                    ))}
+                </div>
+
+                <RankingList matches={matchesList} users={usersList} period={period} onSelectPlayer={setSelectedPlayerStats} config={config} />
+                
+                <button onClick={() => setView(user ? 'newMatch' : 'auth')} className="fixed bottom-20 right-4 md:bottom-8 md:right-8 bg-emerald-500 hover:bg-emerald-400 text-white rounded-full p-4 shadow-2xl shadow-emerald-500/30 transition-transform hover:scale-110 z-50 group">
+                    <PlusCircle className="w-8 h-8" />
+                </button>
+            </>
+        )}
         
-        {view === 'newMatch' && user && (<div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-xl relative"><button onClick={() => setView('dashboard')} className="absolute top-4 right-4 text-slate-400 hover:text-white"><XCircle /></button><NewMatch users={usersList} currentUser={user} isAdmin={isAdmin} onClose={() => setView('dashboard')} onSuccess={(id, status) => { if (status === 'pending_guest') setPendingConfirmationMatchId(id); else { setView('dashboard'); alert(status === 'confirmed' ? 'Partida registrada!' : 'Partida enviada para confirmação!'); } }} /></div>)}
+        {view === 'newMatch' && user && (<div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-xl relative"><button onClick={() => setView('dashboard')} className="absolute top-4 right-4 text-slate-400 hover:text-white"><XCircle /></button><NewMatch users={usersList} currentUser={user} isAdmin={isAdmin} onClose={() => setView('dashboard')} onSuccess={(id, status) => { if (status === 'pending_guest') setPendingConfirmationMatchId(id); else { setView('dashboard'); alert(status === 'confirmed' ? 'Partida registrada!' : 'Partida enviada para confirmação!'); } }} config={config} /></div>)}
         
-        {/* VIEW HISTÓRICO ATUALIZADA */}
         {view === 'history' && (
             <div className="space-y-4">
                 <div className="flex items-center justify-between mb-2">
                     <h2 className="text-xl font-bold text-white flex items-center gap-2"><History className="text-cyan-400" /> Histórico</h2>
                 </div>
                 
-                {/* FILTROS DE HISTÓRICO */}
                 <div className="flex gap-2 mb-4 bg-slate-800 p-2 rounded-xl border border-slate-700">
                     <div className="relative flex-1">
                         <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500"/>
@@ -1166,7 +1388,6 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* LISTA DE PARTIDAS FILTRADA */}
                 {filteredHistory.length === 0 ? (
                     <div className="text-center py-10 text-slate-500">
                         <p>Nenhuma partida encontrada para esta data.</p>
@@ -1207,7 +1428,7 @@ export default function App() {
         )}
 
         {view === 'fines' && <FinesScreen users={usersList} isAdmin={isAdmin} onOpenTransaction={openTransaction} />}
-        {view === 'admin' && isAdmin && <AdminPanel users={usersList} onOpenTransaction={openTransaction} />}
+        {view === 'admin' && isAdmin && <AdminPanel users={usersList} onOpenTransaction={openTransaction} config={config} />}
       </main>
       <nav className="fixed bottom-0 left-0 w-full bg-slate-900 border-t border-slate-800 md:w-20 md:h-screen md:border-t-0 md:border-r md:top-0 md:flex-col md:justify-center z-40"><div className="flex justify-around items-center h-16 md:flex-col md:h-auto md:gap-8"><NavButton icon={Trophy} label="Ranking" active={view === 'dashboard'} onClick={() => setView('dashboard')} /><NavButton icon={History} label="Histórico" active={view === 'history'} onClick={() => setView('history')} /><NavButton icon={Banknote} label="Multas" active={view === 'fines'} onClick={() => setView('fines')} />{isAdmin && <NavButton icon={Gavel} label="Admin" active={view === 'admin'} onClick={() => setView('admin')} />}</div></nav>
     </div>
