@@ -24,7 +24,8 @@ import {
   setDoc, 
   deleteDoc, 
   getDocs, 
-  writeBatch
+  writeBatch,
+  deleteField 
 } from 'firebase/firestore';
 import { 
   Trophy, 
@@ -60,6 +61,7 @@ import {
   Clock,
   Globe
 } from 'lucide-react';
+import confetti from 'canvas-confetti';
 
 // --- CONFIGURAÇÃO DO FIREBASE ---
 const firebaseConfig = {
@@ -94,7 +96,7 @@ const AVATARS = ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨',
 const getRandomAvatar = () => AVATARS[Math.floor(Math.random() * AVATARS.length)];
 
 // --- HELPERS DE TEMPORADA ---
-const getCurrentSeasonId = () => new Date().toISOString().slice(0, 7); // Ex: "2025-12"
+const getCurrentSeasonId = () => new Date().toISOString().slice(0, 7); 
 
 const getSeasonOptions = () => {
     const options = [{ value: 'legacy', label: '📂 Arquivo Morto (Antigos)' }];
@@ -109,7 +111,6 @@ const getSeasonOptions = () => {
     return options;
 };
 
-// --- NOVA FUNÇÃO DE BANIMENTO ---
 const isPlayerBanned = (user, config = DEFAULT_CONFIG) => {
     if (!user) return false;
     const fines = user.fines || 0;
@@ -157,17 +158,81 @@ const dateFilters = {
   all: () => true
 };
 
-// --- COMPONENTES ---
+// --- COMPONENTES DE NATAL ---
+
+const ChristmasSnow = () => {
+    // Verifica se estamos em Dezembro (mês 11 no JS)
+    if (new Date().getMonth() !== 11) return null;
+    
+    const snowStyle = `
+        @keyframes snowfall {
+            0% { transform: translateY(-10px) translateX(0); opacity: 1; }
+            100% { transform: translateY(100vh) translateX(20px); opacity: 0; }
+        }
+        .snowflake { position: fixed; top: -10px; color: #fff; font-size: 1em; opacity: 0.8; pointer-events: none; z-index: 0; animation: snowfall linear infinite; }
+    `;
+    const snowflakes = Array.from({ length: 30 }).map((_, i) => {
+        const left = Math.random() * 100;
+        const animDuration = 5 + Math.random() * 10;
+        const animDelay = Math.random() * 5;
+        const size = 0.5 + Math.random();
+        return (<div key={i} className="snowflake" style={{ left: `${left}vw`, animationDuration: `${animDuration}s`, animationDelay: `${animDelay}s`, transform: `scale(${size})` }}>❄</div>);
+    });
+    
+    return (
+        <div className="fixed inset-0 w-full h-full pointer-events-none z-0">
+            <style>{snowStyle}</style>
+            {snowflakes}
+        </div>
+    );
+};
+
+const ChristmasLights = () => {
+    if (new Date().getMonth() !== 11) return null;
+    return (
+        <div className="fixed top-0 left-0 w-full h-3 z-[60] flex justify-between px-2 overflow-hidden pointer-events-none">
+            {Array.from({ length: 20 }).map((_, i) => {
+                const colors = ['bg-red-500', 'bg-emerald-500', 'bg-yellow-400', 'bg-blue-500'];
+                const color = colors[i % 4];
+                return (<div key={i} className={`w-2 h-2 rounded-full ${color} shadow-[0_0_10px_2px_rgba(255,255,255,0.3)] animate-pulse`} style={{ animationDuration: `${1 + Math.random()}s` }}></div>);
+            })}
+        </div>
+    );
+};
+
+// --- COMPONENTES PADRÃO ---
 
 const AvatarDisplay = ({ avatar, size = "md", className = "" }) => {
     const isImage = avatar && (avatar.startsWith('data:image') || avatar.startsWith('http'));
     const sizeClasses = { sm: "w-8 h-8 text-lg", md: "w-12 h-12 text-2xl", lg: "w-16 h-16 text-4xl", xl: "w-24 h-24 text-6xl" };
+    const isChristmas = new Date().getMonth() === 11;
+
     return (
-        <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center overflow-hidden bg-slate-700 border border-slate-600 ${className}`}>
-            {isImage ? (
-                <img src={avatar} alt="Av" className="w-full h-full object-cover" onError={(e) => {e.target.style.display='none'; e.target.parentNode.innerHTML='❌'}} />
-            ) : (
-                <span role="img">{avatar || '👤'}</span>
+        <div className="relative inline-block">
+            <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center overflow-hidden bg-slate-700 border border-slate-600 ${className} relative z-0`}>
+                {isImage ? (
+                    <img src={avatar} alt="Av" className="w-full h-full object-cover" onError={(e) => {e.target.style.display='none'; e.target.parentNode.innerHTML='❌'}} />
+                ) : (
+                    <span role="img">{avatar || '👤'}</span>
+                )}
+            </div>
+            
+            {/* GORRINHO NA BORDA (SEM TAMPAR O ROSTO) */}
+            {isChristmas && (
+                <svg 
+                    viewBox="0 0 100 100" 
+                    // MUDANÇA: -top-5 (sobe mais) e -left-4 (sai mais para o lado) e w-9 (levemente maior)
+                    className="absolute -top-5 -right-4 w-9 h-9 z-10 pointer-events-none filter drop-shadow-lg" 
+                    // Mantém o espelhamento para a esquerda
+                    style={{ transform: 'scaleX(-1) rotate(-25deg)' }}
+                >
+                    {/* Parte Vermelha */}
+                    <path d="M20,80 Q50,10 80,80" fill="#ef4444" />
+                    {/* Pompom Branco */}
+                    <circle cx="20" cy="80" r="10" fill="white" />
+                    {/* Base Branca */}
+                    <path d="M45,80 Q65,90 85,80" stroke="white" strokeWidth="12" strokeLinecap="round" fill="none" />
+                </svg>
             )}
         </div>
     );
@@ -175,16 +240,13 @@ const AvatarDisplay = ({ avatar, size = "md", className = "" }) => {
 
 const SeasonSelector = ({ current, onChange }) => {
     const options = getSeasonOptions();
-    // Encontrar o label atual para exibir se não estiver na lista (ex: mês futuro)
-    const currentLabel = options.find(o => o.value === current)?.label || current;
-
     return (
         <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-lg border border-slate-700 mb-4 shadow-sm relative">
             <Calendar className="text-emerald-400 w-5 h-5 absolute left-3 pointer-events-none" />
             <select 
                 value={current}
                 onChange={(e) => onChange(e.target.value)}
-                className="bg-transparent text-white text-sm font-bold outline-none w-full cursor-pointer pl-8 appearance-none py-1"
+                className="bg-transparent text-white text-sm font-bold outline-none w-full cursor-pointer pl-8 appearance-none py-1 relative z-10"
             >
                 {options.map(opt => (
                     <option key={opt.value} value={opt.value} className="bg-slate-800 text-white">
@@ -439,11 +501,22 @@ const AuthScreen = ({ onCancel, onLoginSuccess }) => {
       );
   }
 
+  const isChristmas = new Date().getMonth() === 11;
+
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 text-slate-100">
-      <div className="w-full max-w-md bg-slate-800 rounded-xl p-6 shadow-2xl border border-slate-700 relative">
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 text-slate-100 relative overflow-hidden">
+      <ChristmasSnow />
+      <ChristmasLights />
+      <div className="w-full max-w-md bg-slate-800 rounded-xl p-6 shadow-2xl border border-slate-700 relative z-10">
         {onCancel && (<button onClick={onCancel} className="absolute top-4 right-4 text-slate-400 hover:text-white"><XCircle /></button>)}
-        <div className="text-center mb-8"><Trophy className="w-12 h-12 text-emerald-400 mx-auto mb-2" /><h1 className="text-3xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Ping Pong Master</h1></div>
+        <div className="text-center mb-8">
+            <Trophy className={`w-12 h-12 mx-auto mb-2 ${isChristmas ? 'text-red-500' : 'text-emerald-400'}`} />
+            {isChristmas ? (
+                <h1 className="text-3xl font-bold text-white flex items-center justify-center gap-2"><span className="text-red-500 drop-shadow-md">Ping</span><span className="text-emerald-500 drop-shadow-md">Pong</span><span className="bg-gradient-to-r from-yellow-400 to-amber-600 bg-clip-text text-transparent">Master</span><span>🎅</span></h1>
+            ) : (
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Ping Pong Master</h1>
+            )}
+        </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isLogin && (<div><label className="block text-sm font-medium text-slate-300 mb-1">Nome</label><input type="text" required className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" value={name} onChange={(e) => setName(e.target.value)} /></div>)}
           <div><label className="block text-sm font-medium text-slate-300 mb-1">Email</label><input type="email" required className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 focus:ring-2 focus:ring-emerald-500 outline-none" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
@@ -507,7 +580,7 @@ const ProfileModal = ({ user, userDoc, onClose }) => {
 
     return (
         <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-slate-800 w-full max-w-sm rounded-2xl p-6 border border-slate-700 shadow-2xl animate-in zoom-in-95">
+            <div className="bg-slate-800 w-full max-w-sm rounded-2xl p-6 border border-slate-700 shadow-2xl animate-in zoom-in-95 relative z-10">
                 <h2 className="text-xl font-bold text-white mb-4 text-center">Editar Perfil</h2>
                 <div className="flex flex-col items-center mb-6 gap-4">
                     <AvatarDisplay avatar={avatar} size="xl" className="border-4 border-slate-600 shadow-lg" />
@@ -569,7 +642,7 @@ const SettingsModal = ({ config, onClose }) => {
 
     return (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-slate-800 w-full max-w-sm rounded-2xl p-6 border border-slate-700 shadow-2xl animate-in zoom-in-95">
+            <div className="bg-slate-800 w-full max-w-sm rounded-2xl p-6 border border-slate-700 shadow-2xl animate-in zoom-in-95 relative z-10">
                 <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Gavel className="text-amber-400"/> Regras do Jogo</h2>
                 
                 <div className="space-y-4">
@@ -652,7 +725,7 @@ const TransactionModal = ({ user, action, onClose, config }) => {
 
     return (
         <div className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-slate-800 w-full max-w-sm rounded-2xl p-6 border border-slate-700 shadow-2xl animate-in zoom-in-95">
+            <div className="bg-slate-800 w-full max-w-sm rounded-2xl p-6 border border-slate-700 shadow-2xl animate-in zoom-in-95 relative z-10">
                 <h2 className={`text-xl font-bold mb-4 flex items-center gap-2 ${action === 'fine' ? 'text-red-400' : 'text-emerald-400'}`}>
                     {action === 'fine' ? <MinusCircle /> : <CheckCircle />}
                     {action === 'fine' ? `Aplicar Multa: ${user.displayName}` : `Receber de: ${user.displayName}`}
@@ -698,7 +771,7 @@ const FinesScreen = ({ users, isAdmin, onOpenTransaction }) => {
     }, [selectedUser]);
 
     return (
-        <div className="space-y-6 pb-20">
+        <div className="space-y-6 pb-20 relative z-10">
             {showUserSelect && (<UserSelectModal users={users} onClose={() => setShowUserSelect(false)} onSelect={(user) => { setShowUserSelect(false); onOpenTransaction(user, 'fine'); }} />)}
             <div className="flex justify-between items-center"><h2 className="text-xl font-bold text-white flex items-center gap-2"><Banknote className="text-red-400" /> Financeiro</h2>{isAdmin && (<button onClick={() => setShowUserSelect(true)} className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1 shadow-lg"><PlusCircle className="w-3 h-3" /> Aplicar Multa</button>)}</div>
             <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 text-center shadow-lg"><span className="text-slate-400 text-xs font-bold uppercase tracking-wider">Total a Receber</span><div className="text-4xl font-bold text-emerald-400 mt-2">R$ {totalDebt.toFixed(2).replace('.', ',')}</div></div>
@@ -708,7 +781,7 @@ const FinesScreen = ({ users, isAdmin, onOpenTransaction }) => {
     );
 };
 
-// --- RANKING LIST (COM RECUPERAÇÃO INTELIGENTE DE DADOS) ---
+// --- RANKING LIST ---
 const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
   const ranking = useMemo(() => {
     const stats = {};
@@ -788,17 +861,29 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
 
   if (ranking.length === 0) return <div className="text-center p-8 text-slate-500"><Trophy className="w-12 h-12 mx-auto mb-2 opacity-20" /><p>Nenhum registro.</p></div>;
 
+  const isChristmas = new Date().getMonth() === 11;
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 relative z-10">
       {ranking.map((player, index) => {
         const isBanned = isPlayerBanned(player, config);
         const netScore = player.wins - player.losses;
+        const isTop1 = index === 0 && !isBanned && isChristmas;
 
         return (
           <div 
             key={player.uid} 
             onClick={() => onSelectPlayer(player)} 
-            className={`relative flex items-center p-4 rounded-xl border cursor-pointer transition-colors hover:bg-slate-700/50 ${isBanned ? 'bg-red-900/20 border-red-800' : 'bg-slate-800 border-slate-700'} shadow-sm`}
+            className={`relative flex items-center p-4 rounded-xl border cursor-pointer transition-colors hover:bg-slate-700/50 shadow-sm 
+                ${isTop1 ? 'border-transparent' : (isBanned ? 'bg-red-900/20 border-red-800' : 'bg-slate-800 border-slate-700')}
+            `}
+            style={isTop1 ? {
+                backgroundImage: 'linear-gradient(#1e293b, #1e293b), linear-gradient(45deg, #ef4444 25%, #ffffff 25%, #ffffff 50%, #ef4444 50%, #ef4444 75%, #ffffff 75%, #ffffff)',
+                backgroundOrigin: 'border-box',
+                backgroundClip: 'padding-box, border-box',
+                border: '3px solid transparent',
+                backgroundSize: '20px 20px'
+            } : {}}
           >
             <div className="flex-shrink-0 w-8 text-center font-bold text-slate-400 text-xl">#{index + 1}</div>
             <div className="ml-4 flex-1">
@@ -822,7 +907,7 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
   );
 };
 
-// --- NEW MATCH (Com Config Dinâmica + Temporadas) ---
+// --- NEW MATCH ---
 const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess, config }) => {
   const [p1Search, setP1Search] = useState('');
   const [p2Search, setP2Search] = useState('');
@@ -837,8 +922,27 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess, config }) =
   const [loading, setLoading] = useState(false);
   const [isChilenaMode, setIsChilenaMode] = useState(false);
 
-  // Calcula o mês atual para salvar no banco
   const [currentSeasonId] = useState(() => new Date().toISOString().slice(0, 7));
+
+  // --- EFEITOS VISUAIS ---
+  const triggerWinConfetti = () => {
+      const colors = ['#10b981', '#3b82f6', '#f59e0b']; // Verde, Azul, Dourado
+      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 }, colors: colors, zIndex: 9999 });
+  };
+
+  const triggerChilenaEffect = () => {
+      const duration = 2 * 1000;
+      const animationEnd = Date.now() + duration;
+      const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999 };
+      const random = (min, max) => Math.random() * (max - min) + min;
+      const interval = setInterval(function() {
+          const timeLeft = animationEnd - Date.now();
+          if (timeLeft <= 0) return clearInterval(interval);
+          const particleCount = 50 * (timeLeft / duration);
+          confetti({ ...defaults, particleCount, origin: { x: random(0.1, 0.3), y: Math.random() - 0.2 }, colors: ['#ef4444', '#f97316', '#eab308'] });
+          confetti({ ...defaults, particleCount, origin: { x: random(0.7, 0.9), y: Math.random() - 0.2 }, colors: ['#ef4444', '#f97316', '#eab308'] });
+      }, 250);
+  };
 
   const isUserBanned = selectedP1 && !isGuestP1 && isPlayerBanned(selectedP1, config);
   
@@ -866,7 +970,7 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess, config }) =
           createdAt: serverTimestamp(), 
           createdBy: currentUser.uid, 
           isChilena: isChilenaSubmit,
-          seasonId: currentSeasonId // Salva o Mês atual
+          seasonId: currentSeasonId
       };
 
       if (isGuestP1) { matchData.p1Name = guestNameP1 || 'Convidado 1'; matchData.p1Id = 'guest_' + Date.now() + '_1'; } 
@@ -902,6 +1006,13 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess, config }) =
       if(confAt) matchData.confirmedAt = confAt;
       
       const docRef = await addDoc(collection(db, getCollectionPath('matches')), matchData);
+      
+      if (isChilenaSubmit) {
+          triggerChilenaEffect();
+      } else {
+          triggerWinConfetti();
+      }
+
       onSuccess(docRef.id, matchData.status);
     } catch (err) { alert('Erro: ' + err.message); setLoading(false); }
   };
@@ -909,7 +1020,7 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess, config }) =
   const isAutoConfirmButton = isAdmin;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative z-10">
       <h2 className="text-xl font-bold text-white flex items-center gap-2"><PlusCircle className="text-emerald-400" /> Registrar Partida</h2>
       
       <div className="space-y-1">
@@ -998,7 +1109,7 @@ const QrModal = ({ matchId, onClose }) => {
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(confirmationUrl)}&bgcolor=1e293b&color=34d399`;
   return (
     <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-        <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full text-center border border-slate-700 shadow-2xl animate-in zoom-in-95">
+        <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full text-center border border-slate-700 shadow-2xl animate-in zoom-in-95 relative z-10">
             <h2 className="text-2xl font-bold text-white mb-2">Validação</h2>
             <p className="text-slate-400 mb-4 text-sm">Peça para o convidado escanear no celular <strong className="text-white">DELE</strong>.</p>
             <div className="bg-slate-900 p-4 rounded-xl inline-block border-2 border-emerald-500/30 shadow-lg mx-auto"><img src={qrCodeUrl} alt="QR Code" className="rounded-lg" /></div>
@@ -1044,7 +1155,7 @@ const ConfirmMatchScreen = ({ matchId, currentUser, onComplete }) => {
   if (status === 'already_confirmed' || status === 'success') return <div className="p-8 text-center text-emerald-400 font-bold">Partida Confirmada!</div>;
 
   return (
-    <div className="p-6 max-w-md mx-auto bg-slate-800 rounded-xl shadow-2xl m-4 border border-slate-700">
+    <div className="p-6 max-w-md mx-auto bg-slate-800 rounded-xl shadow-2xl m-4 border border-slate-700 relative z-10">
       <h2 className="text-xl font-bold text-white text-center mb-6">Confirmar Placar</h2>
       <div className="flex justify-between items-center bg-slate-900 p-6 rounded-xl mb-6">
         <div className="text-center"><span className="block text-2xl font-bold text-emerald-400">{match.s1}</span><span className="text-xs text-slate-400">{match.p1Name}</span></div>
@@ -1065,6 +1176,7 @@ const AdminPanel = ({ users, onOpenTransaction, config }) => {
     const [adminSearch, setAdminSearch] = useState('');
     const [filterType, setFilterType] = useState('all'); 
     const [showSettings, setShowSettings] = useState(false);
+    const [processing, setProcessing] = useState(false); 
 
     const handleUpdateUser = async (uid, data) => { try { await updateDoc(doc(db, getCollectionPath('users'), uid), data); } catch (e) { alert('Erro: ' + e.message); } };
     const handleDeleteOffline = async (uid) => { if(window.confirm('Tem certeza?')) await deleteDoc(doc(db, getCollectionPath('users'), uid)); };
@@ -1086,6 +1198,41 @@ const AdminPanel = ({ users, onOpenTransaction, config }) => {
     const cancelEditing = () => { setEditingUserId(null); setEditName(''); setEditEmail(''); };
     const saveEdit = async (uid) => { if(!editName.trim() || !editEmail.trim()) return alert('Preencha os campos!'); await handleUpdateUser(uid, { displayName: editName, email: editEmail.trim() }); setEditingUserId(null); };
 
+    // --- FUNÇÃO PARA ZERAR (DESFAZER O RESGATE) ---
+    const handleResetSeason = async () => {
+        if (!confirm("⚠️ TEM CERTEZA? Isso vai remover TODAS as partidas do ranking atual e jogá-las para o Arquivo Morto. O ranking ficará zerado.")) return;
+        
+        setProcessing(true);
+        try {
+            const currentSeasonTag = new Date().toISOString().slice(0, 7); 
+
+            const q = query(
+                collection(db, getCollectionPath('matches')), 
+                where('seasonId', '==', currentSeasonTag)
+            );
+            
+            const snapshot = await getDocs(q);
+            const batch = writeBatch(db);
+            let count = 0;
+
+            snapshot.docs.forEach(doc => {
+                batch.update(doc.ref, { seasonId: deleteField() });
+                count++;
+            });
+
+            if (count > 0) {
+                await batch.commit();
+                alert(`Pronto! ${count} partidas foram removidas da temporada atual. O ranking foi zerado.`);
+            } else {
+                alert("O ranking já está vazio! Nenhuma partida encontrada nesta temporada.");
+            }
+        } catch (e) {
+            alert("Erro ao zerar: " + e.message);
+        } finally {
+            setProcessing(false);
+        }
+    };
+
     const filteredUsers = users.filter(user => {
         const term = adminSearch.toLowerCase();
         const matchesSearch = user.displayName.toLowerCase().includes(term) || (user.email && user.email.toLowerCase().includes(term));
@@ -1097,7 +1244,7 @@ const AdminPanel = ({ users, onOpenTransaction, config }) => {
     });
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 relative z-10">
             {showSettings && <SettingsModal config={config} onClose={() => setShowSettings(false)} />}
             
             <div className="flex justify-between items-center">
@@ -1106,16 +1253,26 @@ const AdminPanel = ({ users, onOpenTransaction, config }) => {
                     <Edit2 className="w-4 h-4" /> Regras
                 </button>
             </div>
-            
-            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><UserPlus className="w-4 h-4" /> Cadastrar Sem Conta</h3>
-                <form onSubmit={addOfflinePlayer} className="flex flex-col gap-2">
-                    <div className="flex flex-col sm:flex-row gap-2">
-                        <input type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineName} onChange={(e) => setNewOfflineName(e.target.value)} required />
-                        <input type="email" placeholder="E-mail real (opcional)" className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineEmail} onChange={(e) => setNewOfflineEmail(e.target.value)} />
+
+            <div className="grid grid-cols-1 gap-4">
+                <div className="bg-red-900/20 border border-red-500/30 p-3 rounded-lg flex items-center justify-between">
+                    <div>
+                        <h4 className="text-red-400 font-bold text-sm flex items-center gap-2"><Trash2 className="w-4 h-4"/> Zerar Ranking Atual</h4>
+                        <p className="text-slate-400 text-[10px]">Move os jogos atuais para o Arquivo Morto.</p>
                     </div>
-                    <button className="bg-slate-700 text-white px-3 py-2 rounded text-xs font-bold w-full hover:bg-slate-600 transition-colors">Adicionar & Reservar E-mail</button>
-                </form>
+                    <button onClick={handleResetSeason} disabled={processing} className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-2 rounded-lg">{processing ? 'Zerando...' : 'ZERAR TUDO'}</button>
+                </div>
+
+                <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                    <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><UserPlus className="w-4 h-4" /> Cadastrar Sem Conta</h3>
+                    <form onSubmit={addOfflinePlayer} className="flex flex-col gap-2">
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            <input type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineName} onChange={(e) => setNewOfflineName(e.target.value)} required />
+                            <input type="email" placeholder="E-mail real (opcional)" className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" value={newOfflineEmail} onChange={(e) => setNewOfflineEmail(e.target.value)} />
+                        </div>
+                        <button className="bg-slate-700 text-white px-3 py-2 rounded text-xs font-bold w-full hover:bg-slate-600 transition-colors">Adicionar & Reservar E-mail</button>
+                    </form>
+                </div>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3 items-center bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
@@ -1214,7 +1371,6 @@ export default function App() {
 
     if (currentSeason === 'legacy') {
         // Se for "Arquivo Morto", baixamos tudo e filtramos quem NÃO tem seasonId
-        // (Isso é mais leve do que parece, pois são só os jogos antigos)
         q = matchesRef; 
     } else {
         // Se for um Mês específico, usamos query do banco! (Rápido ⚡)
@@ -1274,7 +1430,7 @@ export default function App() {
   };
 
   if (loading) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-emerald-400">Carregando...</div>;
-  if (confirmMatchId) return <div className="min-h-screen bg-slate-900 text-slate-100"><ConfirmMatchScreen matchId={confirmMatchId} currentUser={user} onComplete={clearUrl}/></div>;
+  if (confirmMatchId) return <div className="min-h-screen bg-slate-900 text-slate-100 relative z-10"><ChristmasSnow /><ChristmasLights /><ConfirmMatchScreen matchId={confirmMatchId} currentUser={user} onComplete={clearUrl}/></div>;
    
   if (view === 'auth' && !user) {
       return <AuthScreen onCancel={() => setView('dashboard')} onLoginSuccess={() => setView('dashboard')} />;
@@ -1297,15 +1453,27 @@ export default function App() {
       return true;
   });
 
+  const isChristmas = new Date().getMonth() === 11;
+
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 pb-20 md:pb-0 md:pl-20 relative">
+    <div className="min-h-screen bg-slate-900 text-slate-100 pb-20 md:pb-0 md:pl-20 relative overflow-x-hidden overflow-y-auto">
+      <ChristmasSnow />
+      <ChristmasLights />
+      
       {pendingConfirmationMatchId && <QrModal matchId={pendingConfirmationMatchId} onClose={() => setPendingConfirmationMatchId(null)} />}
       {showProfile && user && <ProfileModal user={user} userDoc={currentUserDoc} onClose={() => setShowProfile(false)} />}
       {transactionModal && <TransactionModal user={transactionModal.user} action={transactionModal.action} onClose={() => setTransactionModal(null)} config={config} />}
       {selectedPlayerStats && <PlayerStatsModal player={selectedPlayerStats} onClose={() => setSelectedPlayerStats(null)} />}
 
-      <header className="bg-slate-800/50 backdrop-blur-md border-b border-slate-700 p-4 sticky top-0 z-20 flex justify-between items-center md:hidden">
-        <div className="flex items-center gap-2"><Trophy className="text-emerald-400 w-6 h-6" /><span className="font-bold text-lg bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Master</span></div>
+      <header className="bg-slate-800/50 backdrop-blur-md border-b border-slate-700 p-4 sticky top-0 z-20 flex justify-between items-center md:hidden relative">
+        <div className="flex items-center gap-2">
+            <Trophy className={`w-6 h-6 ${isChristmas ? 'text-red-500' : 'text-emerald-400'}`} />
+            {isChristmas ? (
+                <span className="font-bold text-lg text-white flex items-center gap-1"><span className="text-red-500">Ping</span><span className="text-emerald-500">Pong</span><span className="bg-gradient-to-r from-yellow-400 to-amber-600 bg-clip-text text-transparent">Master</span>🎅</span>
+            ) : (
+                <span className="font-bold text-lg bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Master</span>
+            )}
+        </div>
         <div className="flex gap-4">
             {user ? (
                 <>
@@ -1318,11 +1486,15 @@ export default function App() {
         </div>
       </header>
 
-      {notifications.length > 0 && <div className="bg-amber-600/90 backdrop-blur text-white p-3 sticky top-14 md:top-0 z-30 animate-in slide-in-from-top"><div className="max-w-2xl mx-auto flex justify-between items-center"><span className="text-sm font-medium">Você tem {notifications.length} partida(s) para confirmar!</span><button onClick={() => setConfirmMatchId(notifications[0].id)} className="bg-white text-amber-700 text-xs font-bold px-3 py-1 rounded-full shadow-sm">Ver</button></div></div>}
+      {notifications.length > 0 && <div className="bg-amber-600/90 backdrop-blur text-white p-3 sticky top-14 md:top-0 z-30 animate-in slide-in-from-top relative"><div className="max-w-2xl mx-auto flex justify-between items-center"><span className="text-sm font-medium">Você tem {notifications.length} partida(s) para confirmar!</span><button onClick={() => setConfirmMatchId(notifications[0].id)} className="bg-white text-amber-700 text-xs font-bold px-3 py-1 rounded-full shadow-sm">Ver</button></div></div>}
       
-      <main className="max-w-2xl mx-auto p-4 space-y-6 min-h-screen">
+      <main className="max-w-2xl mx-auto p-4 space-y-6 min-h-screen relative z-10">
         <div className="hidden md:flex justify-between items-center mb-8 pt-8">
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Ping Pong Master</h1>
+            {isChristmas ? (
+                <h1 className="text-3xl font-bold text-white flex items-center gap-2"><span className="text-red-500 drop-shadow-md">Ping</span><span className="text-emerald-500 drop-shadow-md">Pong</span><span className="bg-gradient-to-r from-yellow-400 to-amber-600 bg-clip-text text-transparent">Master</span><span>🎅</span></h1>
+            ) : (
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Ping Pong Master</h1>
+            )}
             <div className="flex items-center gap-4">
                 {user ? (
                     <>
@@ -1430,7 +1602,14 @@ export default function App() {
         {view === 'fines' && <FinesScreen users={usersList} isAdmin={isAdmin} onOpenTransaction={openTransaction} />}
         {view === 'admin' && isAdmin && <AdminPanel users={usersList} onOpenTransaction={openTransaction} config={config} />}
       </main>
-      <nav className="fixed bottom-0 left-0 w-full bg-slate-900 border-t border-slate-800 md:w-20 md:h-screen md:border-t-0 md:border-r md:top-0 md:flex-col md:justify-center z-40"><div className="flex justify-around items-center h-16 md:flex-col md:h-auto md:gap-8"><NavButton icon={Trophy} label="Ranking" active={view === 'dashboard'} onClick={() => setView('dashboard')} /><NavButton icon={History} label="Histórico" active={view === 'history'} onClick={() => setView('history')} /><NavButton icon={Banknote} label="Multas" active={view === 'fines'} onClick={() => setView('fines')} />{isAdmin && <NavButton icon={Gavel} label="Admin" active={view === 'admin'} onClick={() => setView('admin')} />}</div></nav>
+      <nav className="fixed bottom-0 left-0 w-full bg-slate-900 border-t border-slate-800 md:w-20 md:h-screen md:border-t-0 md:border-r md:top-0 md:flex-col md:justify-center z-50">
+        <div className="flex justify-around items-center h-16 md:flex-col md:h-auto md:gap-8">
+            <NavButton icon={Trophy} label="Ranking" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
+            <NavButton icon={History} label="Histórico" active={view === 'history'} onClick={() => setView('history')} />
+            <NavButton icon={Banknote} label="Multas" active={view === 'fines'} onClick={() => setView('fines')} />
+            {isAdmin && <NavButton icon={Gavel} label="Admin" active={view === 'admin'} onClick={() => setView('admin')} />}
+        </div>
+      </nav>
     </div>
   );
 }
