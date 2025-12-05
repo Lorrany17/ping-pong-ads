@@ -907,8 +907,8 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
   );
 };
 
-// --- NEW MATCH ---
-const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess, config }) => {
+// --- NEW MATCH (COM RIVALIDADE ATUALIZADA) ---
+const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, config }) => {
   const [p1Search, setP1Search] = useState('');
   const [p2Search, setP2Search] = useState('');
   const [selectedP1, setSelectedP1] = useState(users.find(u => u.uid === currentUser.uid));
@@ -924,9 +924,54 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess, config }) =
 
   const [currentSeasonId] = useState(() => new Date().toISOString().slice(0, 7));
 
+  // --- LÓGICA DE RIVALIDADE (NOVO) ---
+  const rivalryStats = useMemo(() => {
+    if (!selectedP1 || !selectedP2 || isGuestP1 || isGuestP2) return null;
+    
+    // Filtra jogos entre os dois selecionados
+    const history = matches.filter(m => 
+        (m.p1Id === selectedP1.uid && m.p2Id === selectedP2.uid) ||
+        (m.p1Id === selectedP2.uid && m.p2Id === selectedP1.uid)
+    );
+
+    let wins1 = 0;
+    let wins2 = 0;
+
+    history.forEach(m => {
+        // Ignora jogos cancelados/pendentes se quiser, ou usa todos
+        if (m.status !== 'confirmed') return;
+
+        const p1IsP1InMatch = m.p1Id === selectedP1.uid;
+        const s1 = p1IsP1InMatch ? m.s1 : m.s2;
+        const s2 = p1IsP1InMatch ? m.s2 : m.s1;
+
+        if (s1 > s2) wins1++;
+        else if (s2 > s1) wins2++;
+    });
+
+    let statusLabel = "⚖️ Clássico Equilibrado";
+    let statusColor = "text-slate-400";
+    
+    const diff = wins1 - wins2;
+    const total = wins1 + wins2;
+
+    if (total < 3) {
+        statusLabel = "🔥 Começando a rivalidade...";
+    } else if (diff >= 3) {
+        statusLabel = `☠️ ${selectedP1.displayName} é o Carrasco!`;
+        statusColor = "text-emerald-400";
+    } else if (diff <= -3) {
+        statusLabel = `🦆 ${selectedP1.displayName} é Freguês!`;
+        statusColor = "text-amber-400"; // Amarelo de pato
+    }
+
+    return { wins1, wins2, total, statusLabel, statusColor };
+  }, [selectedP1, selectedP2, matches, isGuestP1, isGuestP2]);
+
+
   // --- EFEITOS VISUAIS ---
   const triggerWinConfetti = () => {
-      const colors = ['#10b981', '#3b82f6', '#f59e0b']; // Verde, Azul, Dourado
+      const colors = ['#10b981', '#3b82f6', '#f59e0b']; 
       confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 }, colors: colors, zIndex: 9999 });
   };
 
@@ -1072,6 +1117,31 @@ const NewMatch = ({ users, currentUser, isAdmin, onClose, onSuccess, config }) =
             )
         )}
       </div>
+
+      {/* --- BLOCO DE RIVALIDADE (NOVO) --- */}
+      {rivalryStats && (
+        <div className="bg-slate-900/50 border border-slate-700/50 p-3 rounded-xl animate-in fade-in zoom-in-95">
+            <div className="flex justify-between items-center text-xs text-slate-400 mb-2 uppercase font-bold tracking-wider">
+                <span>Histórico (Geral)</span>
+                <span>{rivalryStats.total} Jogos</span>
+            </div>
+            <div className="flex items-center justify-between px-2">
+                <div className="text-center">
+                    <span className="block text-xl font-bold text-white">{rivalryStats.wins1}</span>
+                    <span className="text-[10px] text-slate-500">Vitórias J1</span>
+                </div>
+                <div className="h-8 w-px bg-slate-700"></div>
+                <div className="text-center">
+                     <span className={`text-xs font-bold ${rivalryStats.statusColor}`}>{rivalryStats.statusLabel}</span>
+                </div>
+                <div className="h-8 w-px bg-slate-700"></div>
+                <div className="text-center">
+                    <span className="block text-xl font-bold text-emerald-400">{rivalryStats.wins2}</span>
+                    <span className="text-[10px] text-slate-500">Vitórias J2</span>
+                </div>
+            </div>
+        </div>
+      )}
 
       <div className="flex justify-end">
           <button type="button" onClick={() => setIsChilenaMode(!isChilenaMode)} className={`text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1 border transition-all ${isChilenaMode ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500' : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
@@ -1531,7 +1601,7 @@ export default function App() {
             </>
         )}
         
-        {view === 'newMatch' && user && (<div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-xl relative"><button onClick={() => setView('dashboard')} className="absolute top-4 right-4 text-slate-400 hover:text-white"><XCircle /></button><NewMatch users={usersList} currentUser={user} isAdmin={isAdmin} onClose={() => setView('dashboard')} onSuccess={(id, status) => { if (status === 'pending_guest') setPendingConfirmationMatchId(id); else { setView('dashboard'); alert(status === 'confirmed' ? 'Partida registrada!' : 'Partida enviada para confirmação!'); } }} config={config} /></div>)}
+        {view === 'newMatch' && user && (<div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-xl relative"><button onClick={() => setView('dashboard')} className="absolute top-4 right-4 text-slate-400 hover:text-white"><XCircle /></button><NewMatch matches={matchesList} users={usersList} currentUser={user} isAdmin={isAdmin} onClose={() => setView('dashboard')} onSuccess={(id, status) => { if (status === 'pending_guest') setPendingConfirmationMatchId(id); else { setView('dashboard'); alert(status === 'confirmed' ? 'Partida registrada!' : 'Partida enviada para confirmação!'); } }} config={config} /></div>)}
         
         {view === 'history' && (
             <div className="space-y-4">
