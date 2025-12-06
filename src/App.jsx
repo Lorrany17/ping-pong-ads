@@ -264,9 +264,15 @@ const PlayerStatsModal = ({ player, onClose }) => {
     const netScore = player.wins - player.losses;
     const winRate = player.games > 0 ? Math.round((player.wins / player.games) * 100) : 0;
 
+    // USA A MESMA LÓGICA DO RANKING AGORA
+    const activeBadges = calculateBadges(player);
+
     return (
         <div className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-slate-800 w-full max-w-sm rounded-2xl p-6 border border-slate-700 shadow-2xl animate-in zoom-in-95">
+                {/* ... (O RESTO DO CÓDIGO DO MODAL CONTINUA IGUAL) ... */}
+                {/* Apenas certifique-se de manter a renderização das medalhas que fizemos antes */}
+                
                 <div className="flex justify-between items-start mb-4">
                     <div className="flex items-center gap-3">
                         <AvatarDisplay avatar={player.avatar} size="lg" className="border-2 border-emerald-500" />
@@ -279,6 +285,30 @@ const PlayerStatsModal = ({ player, onClose }) => {
                     </div>
                     <button onClick={onClose} className="text-slate-400 hover:text-white bg-slate-700 rounded-full p-1"><XCircle className="w-6 h-6" /></button>
                 </div>
+
+                {activeBadges.length > 0 && (
+                    <div className="mb-5 bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
+                        <h3 className="text-[10px] font-bold text-slate-400 uppercase mb-2 ml-1 flex items-center gap-1">
+                            <Trophy className="w-3 h-3 text-yellow-500" /> Conquistas Desbloqueadas
+                        </h3>
+                        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                            {activeBadges.map(badgeKey => {
+                                const info = BADGES_CONFIG[badgeKey];
+                                if (!info) return null;
+                                return (
+                                    <div key={badgeKey} className="flex flex-col items-center bg-slate-800 p-2 rounded-lg border border-slate-700 min-w-[70px] shadow-sm relative group cursor-help">
+                                        <span className="text-2xl mb-1 filter drop-shadow-md">{info.emoji}</span>
+                                        <span className={`text-[9px] font-bold text-center leading-tight ${info.color}`}>{info.title}</span>
+                                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-max max-w-[150px] bg-black text-white text-[10px] p-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 shadow-xl border border-slate-600">
+                                            {info.desc}
+                                            <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-black"></div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3 mb-4">
                     <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700 text-center">
@@ -300,21 +330,12 @@ const PlayerStatsModal = ({ player, onClose }) => {
                         <span className="text-sm text-slate-300 flex items-center gap-2"><Trophy className="w-4 h-4 text-yellow-500" /> Total Partidas</span>
                         <span className="font-bold text-white">{player.games}</span>
                     </div>
-                    <div className="bg-slate-700/30 p-3 rounded-lg flex justify-between items-center">
-                        <span className="text-sm text-slate-300 flex items-center gap-2"><Plus className="w-4 h-4 text-emerald-500" /> Pontos Feitos</span>
-                        <span className="font-bold text-white">{player.pointsScored}</span>
-                    </div>
-                    <div className="bg-slate-700/30 p-3 rounded-lg flex justify-between items-center">
-                        <span className="text-sm text-slate-300 flex items-center gap-2"><Minus className="w-4 h-4 text-red-500" /> Pontos Sofridos</span>
-                        <span className="font-bold text-white">{player.pointsConceded}</span>
-                    </div>
-                    <div className="bg-slate-700/30 p-3 rounded-lg flex justify-between items-center border-t border-slate-600 mt-2">
+                    <div className="bg-slate-700/30 p-3 rounded-lg flex justify-between items-center border-t border-slate-600 mt-2 pt-2">
                         <span className="text-sm text-slate-300 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-blue-400" /> Saldo de Pontos</span>
                         <span className={`font-bold ${player.pointDiff >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
                             {player.pointDiff > 0 ? '+' : ''}{player.pointDiff}
                         </span>
                     </div>
-                    
                     <div className="grid grid-cols-2 gap-2 mt-2">
                          <div className="bg-slate-700/30 p-3 rounded-lg flex flex-col items-center text-center">
                             <span className="text-[10px] text-slate-400 mb-1 flex items-center gap-1"><Zap className="w-3 h-3 text-yellow-400" fill="currentColor" /> Chilenas Dadas</span>
@@ -781,6 +802,33 @@ const FinesScreen = ({ users, isAdmin, onOpenTransaction }) => {
     );
 };
 
+// --- CONFIGURAÇÃO DAS MEDALHAS ---
+const BADGES_CONFIG = {
+    'vip':        { emoji: '💼', title: 'Sócio',       desc: 'Dono da raquete (VIP)', color: 'text-amber-400' },
+    'natal':      { emoji: '🎅', title: 'Natalino',    desc: 'Jogou em Dezembro', color: 'text-red-400' },
+    'invicto':    { emoji: '🛡️', title: 'Invicto',     desc: 'Sem derrotas (min 5 jogos)', color: 'text-blue-400' }, // Dificuldade aumentada
+    'veterano':   { emoji: '🎖️', title: 'Veterano',    desc: '50+ partidas jogadas', color: 'text-slate-300' },       // Dificuldade aumentada (era 10)
+    'artilheiro': { emoji: '⚽', title: 'Artilheiro',  desc: '200+ pontos marcados', color: 'text-emerald-400' },     // Dificuldade aumentada (era 50)
+    'paredao':    { emoji: '🧱', title: 'Paredão',     desc: 'Saldo de pontos > 50', color: 'text-orange-400' },      // Dificuldade aumentada (era 20)
+    'zica':       { emoji: '👻', title: 'Azarado',      desc: 'Só derrotas (min 5 jogos)', color: 'text-purple-400' }  // Dificuldade aumentada
+};
+
+// Função auxiliar para calcular medalhas (centralizada)
+const calculateBadges = (player) => {
+    const active = [];
+    if (player.isOwner) active.push('vip');
+    if (new Date().getMonth() === 11) active.push('natal');
+    
+    // NOVOS CRITÉRIOS DE DIFICULDADE
+    if (player.wins > 0 && player.losses === 0 && player.games >= 5) active.push('invicto'); // Mínimo 5 jogos
+    if (player.games >= 50) active.push('veterano');       // Exige fidelidade!
+    if (player.pointsScored >= 200) active.push('artilheiro'); // Exige muito ponto
+    if (player.pointDiff >= 50) active.push('paredao');    // Exige dominar os jogos
+    if (player.wins === 0 && player.losses >= 5) active.push('zica'); // Zica braba
+
+    return active;
+};
+
 // --- RANKING LIST ---
 const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
   const ranking = useMemo(() => {
@@ -869,6 +917,9 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
         const isBanned = isPlayerBanned(player, config);
         const netScore = player.wins - player.losses;
         const isTop1 = index === 0 && !isBanned && isChristmas;
+        
+        // CALCULA AS MEDALHAS AQUI PARA EXIBIR NA LISTA
+        const badges = calculateBadges(player);
 
         return (
           <div 
@@ -892,7 +943,26 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
                 <h3 className={`font-bold text-lg ${isBanned ? 'text-red-400' : 'text-white'}`}>{player.displayName}</h3>
                 {player.isOwner && <span className="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">Dono</span>}
               </div>
-              <p className="text-sm text-slate-400">{player.wins}V • {player.losses}D <span className="text-xs text-slate-500">({player.games} jogos)</span></p>
+              
+              {/* --- AQUI ESTÃO AS MEDALHAS NA LISTA --- */}
+              {/* --- LIMITAR A 4 MEDALHAS NA LISTA PARA NÃO QUEBRAR O LAYOUT --- */}
+              {badges.length > 0 && (
+                  <div className="flex gap-1 mt-1 flex-wrap">
+                      {badges.slice(0, 4).map(b => (
+                          <span key={b} className="text-[10px] bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-600/50 cursor-help" title={BADGES_CONFIG[b].title}>
+                              {BADGES_CONFIG[b].emoji}
+                          </span>
+                      ))}
+                      {/* Se tiver mais que 4, mostra um indicador "+X" */}
+                      {badges.length > 4 && (
+                          <span className="text-[9px] text-slate-500 flex items-center bg-slate-900/50 px-1 rounded">
+                              +{badges.length - 4}
+                          </span>
+                      )}
+                  </div>
+              )}
+
+              <p className="text-sm text-slate-400 mt-1">{player.wins}V • {player.losses}D <span className="text-xs text-slate-500">({player.games} jogos)</span></p>
             </div>
             <div className="text-right">
                 <span className={`block text-xl font-bold ${netScore >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
