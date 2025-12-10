@@ -10,7 +10,10 @@ import {
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { 
-  getFirestore, 
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache, 
+  persistentMultipleTabManager,
   collection, 
   addDoc, 
   query, 
@@ -86,7 +89,9 @@ const DEFAULT_CONFIG = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'pingpong-app';
 
 const getCollectionPath = (colName) => `artifacts/${appId}/public/data/${colName}`;
@@ -470,29 +475,114 @@ const AuthScreen = ({ onCancel, onLoginSuccess }) => {
     } catch (e) { return null; }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
+  const handleSubmit = async (winType) => {
+    if (!isGuestP1 && !selectedP1) return;
+    if (!isGuestP2 && !selectedP2) return;
+    if (isDoubles && (!selectedP1Partner || !selectedP2Partner)) return alert("Selecione as duplas completas!");
+
     setLoading(true);
     try {
-      if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
-      } else {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        await updateProfile(userCredential.user, { displayName: name });
-        const isAdmin = ADMIN_EMAILS.includes(email);
-        const migratedData = await migrateOfflineUser(userCredential.user.uid, email);
-        await setDoc(doc(db, getCollectionPath('users'), userCredential.user.uid), {
-          uid: userCredential.user.uid, displayName: name, email: email,
-          avatar: migratedData?.avatar || getRandomAvatar(), isOwner: migratedData?.isOwner || false, 
-          fines: migratedData?.fines || 0, 
-          balance: migratedData?.balance || 0,
-          role: isAdmin ? 'admin' : 'user', createdAt: serverTimestamp()
-        });
-        if (migratedData) alert(`Bem-vindo(a) ${name}! Histórico recuperado.`);
+      const matchData = { 
+          createdAt: serverTimestamp(), 
+          createdBy: currentUser.uid, 
+          seasonId: currentSeasonId,
+          isChilena: false,
+          isSimpleWin: false,
+          isDoubles: isDoubles
+      };
+
+      // ... (LÓGICA DE NOMES E IDS PERMANECE IGUAL) ...
+      if (isGuestP1) { matchData.p1Name = guestNameP1 || 'Convidado 1'; matchData.p1Id = 'guest_' + Date.now() + '_1'; } 
+      else { matchData.p1Name = selectedP1.displayName; matchData.p1Id = selectedP1.uid; }
+      if (isDoubles && selectedP1Partner) { matchData.p1PartnerName = selectedP1Partner.displayName; matchData.p1PartnerId = selectedP1Partner.uid; }
+
+      if (isGuestP2) { matchData.p2Name = guestNameP2 || 'Convidado 2'; matchData.p2Id = 'guest_' + Date.now() + '_2'; } 
+      else { matchData.p2Name = selectedP2.displayName; matchData.p2Id = selectedP2.uid; }
+      if (isDoubles && selectedP2Partner) { matchData.p2PartnerName = selectedP2Partner.displayName; matchData.p2PartnerId = selectedP2Partner.uid; }
+
+      let s1Final = 0, s2Final = 0;
+
+      // ... (LÓGICA DE PLACAR PERMANECE IGUAL) ...
+      if (winType === 'score') {
+          if (!score1 || !score2) return;
+          s1Final = parseInt(score1);
+          s2Final = parseInt(score2);
+      } else if (winType === 'p1_chilena') {
+          s1Final = 7; s2Final = 0; matchData.isChilena = true;
+      } else if (winType === 'p2_chilena') {
+          s1Final = 0; s2Final = 7; matchData.isChilena = true;
+      } else if (winType === 'p1_simple') {
+          s1Final = 1; s2Final = 0; matchData.isSimpleWin = true; 
+      } else if (winType === 'p2_simple') {
+          s1Final = 0; s2Final = 1; matchData.isSimpleWin = true; 
       }
-      if(onLoginSuccess) onLoginSuccess();
-    } catch (err) { setError(err.message); } finally { setLoading(false); }
+
+      matchData.s1 = s1Final;
+      matchData.s2 = s2Final;
+
+      let newStatus = 'pending_user';
+      let confBy = null;
+      let confAt = null;
+
+      if (isAdmin) {
+          newStatus = 'confirmed'; confBy = 'admin_scribe'; confAt = serverTimestamp();
+      } else {
+          newStatus = 'pending_guest'; 
+      }
+
+      matchData.status = newStatus;
+      if(confBy) matchData.confirmedBy = confBy;
+      if(confAt) matchData.confirmedAt = confAt;
+      
+      const docRef = await addDoc(collection(db, getCollectionPath('matches')), matchData);
+      
+      if (matchData.isChilena) triggerChilenaEffect();
+      else triggerWinConfetti();
+
+      // --- 👠 ZOEIRA DO "PERDEU DE 4" (NOVA LÓGICA AQUI) ---
+      // Só executa se não for chilena (chilena é 7x0) e tiver placar real
+      if (!matchData.isChilena && !matchData.isSimpleWin) {
+          const p1Won = s1Final > s2Final;
+          const loserScore = p1Won ? s2Final : s1Final;
+          const loserName = p1Won ? (matchData.p2Name) : (matchData.p1Name);
+          
+          if (loserScore === 4) {
+              // Toca um alerta humilhante
+              alert(`👠 IHHH! ${loserName} PERDEU DE 4!\n\n🤣 VIROU PUTA! 🤣`);
+          }
+      }
+
+      // --- LÓGICA DO REI DA MESA ---
+      if (isKingMode && newStatus === 'confirmed') {
+          const p1Won = s1Final > s2Final;
+          if (!p1Won) {
+              if (isGuestP2) {
+                  setIsGuestP1(true);
+                  setGuestNameP1(guestNameP2);
+                  setSelectedP1(null);
+                  setSelectedP1Partner(null);
+              } else {
+                  setIsGuestP1(false);
+                  setSelectedP1(selectedP2);
+                  if (isDoubles) setSelectedP1Partner(selectedP2Partner);
+              }
+          }
+          setIsGuestP2(false);
+          setGuestNameP2('');
+          setSelectedP2(null);
+          setSelectedP2Partner(null);
+          setScore1('');
+          setScore2('');
+          setLoading(false);
+          if(!((!matchData.isChilena && !matchData.isSimpleWin) && ((p1Won ? s2Final : s1Final) === 4))) {
+             // Só mostra o alerta do Rei se não mostrou o da Puta (pra não ter 2 alerts seguidos)
+             alert('👑 Vencedores continuam! Quem são os próximos desafiantes?');
+          }
+      } else {
+          onSuccess(docRef.id, matchData.status);
+      }
+
+    } catch (err) { alert('Erro: ' + err.message); setLoading(false); }
   };
 
   const handleResetPassword = async (e) => {
@@ -835,6 +925,7 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
     const stats = {};
     const nameToUid = {}; 
 
+    // Inicializa estatísticas zeradas
     users.forEach(u => { 
         stats[u.uid] = { 
             ...u, 
@@ -845,6 +936,33 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
         if (u.displayName) nameToUid[u.displayName.toLowerCase().trim()] = u.uid;
     });
     
+    // Função Auxiliar para Processar Resultado
+    const processResult = (playerId, isWinner, sPro, sCon, isChilena) => {
+        if (!playerId) return;
+        
+        // Tenta achar pelo ID, se não, tenta recuperar pelo nome (para convidados antigos ou bugs)
+        let finalId = playerId;
+        // Se não tem stats para esse ID, talvez seja um nome? (Fallback)
+        if (!stats[finalId] && nameToUid[finalId.toLowerCase?.()]) {
+            finalId = nameToUid[finalId.toLowerCase()];
+        }
+
+        if (stats[finalId]) {
+            stats[finalId].games++;
+            stats[finalId].pointsScored += sPro;
+            stats[finalId].pointsConceded += sCon;
+            stats[finalId].pointDiff += (sPro - sCon);
+            
+            if (isWinner) {
+                stats[finalId].wins++;
+                if (isChilena) stats[finalId].chilenasGiven++;
+            } else {
+                stats[finalId].losses++;
+                if (isChilena) stats[finalId].chilenasReceived++;
+            }
+        }
+    };
+
     matches.forEach(m => {
       const isConfirmed = m.status === 'confirmed' || m.status === undefined || m.status === null;
       if (!isConfirmed) return; 
@@ -856,46 +974,15 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
 
       const s1 = Number(m.s1 || 0);
       const s2 = Number(m.s2 || 0);
+      const p1Won = s1 > s2;
 
-      let p1Id = m.p1Id;
-      if (!stats[p1Id] && m.p1Name) {
-          const recoveredId = nameToUid[m.p1Name.toLowerCase().trim()];
-          if (recoveredId) p1Id = recoveredId;
-      }
+      // Processa Time 1 (J1 + Parceiro)
+      processResult(m.p1Id, p1Won, s1, s2, m.isChilena);
+      if (m.p1PartnerId) processResult(m.p1PartnerId, p1Won, s1, s2, m.isChilena);
 
-      let p2Id = m.p2Id;
-      if (p2Id && !stats[p2Id] && m.p2Name) {
-          const recoveredId = nameToUid[m.p2Name.toLowerCase().trim()];
-          if (recoveredId) p2Id = recoveredId;
-      }
-
-      if (stats[p1Id]) { 
-          stats[p1Id].games++; 
-          stats[p1Id].pointsScored += s1;
-          stats[p1Id].pointsConceded += s2;
-          stats[p1Id].pointDiff += (s1 - s2);
-          if (s1 > s2) {
-              stats[p1Id].wins++; 
-              if (m.isChilena) stats[p1Id].chilenasGiven++; 
-          } else {
-              stats[p1Id].losses++; 
-              if (m.isChilena) stats[p1Id].chilenasReceived++; 
-          }
-      }
-
-      if (p2Id && stats[p2Id]) { 
-            stats[p2Id].games++; 
-            stats[p2Id].pointsScored += s2;
-            stats[p2Id].pointsConceded += s1;
-            stats[p2Id].pointDiff += (s2 - s1);
-            if (s2 > s1) {
-                stats[p2Id].wins++; 
-                if (m.isChilena) stats[p2Id].chilenasGiven++; 
-            } else {
-                stats[p2Id].losses++; 
-                if (m.isChilena) stats[p2Id].chilenasReceived++; 
-            }
-      }
+      // Processa Time 2 (J2 + Parceiro)
+      processResult(m.p2Id, !p1Won, s2, s1, m.isChilena);
+      if (m.p2PartnerId) processResult(m.p2PartnerId, !p1Won, s2, s1, m.isChilena);
     });
     
     return Object.values(stats).filter(p => p.games > 0 || p.fines > 0).sort((a, b) => {
@@ -917,8 +1004,6 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
         const isBanned = isPlayerBanned(player, config);
         const netScore = player.wins - player.losses;
         const isTop1 = index === 0 && !isBanned && isChristmas;
-        
-        // CALCULA AS MEDALHAS AQUI PARA EXIBIR NA LISTA
         const badges = calculateBadges(player);
 
         return (
@@ -944,21 +1029,18 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
                 {player.isOwner && <span className="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">Dono</span>}
               </div>
               
-              {/* --- AQUI ESTÃO AS MEDALHAS NA LISTA --- */}
-              {/* --- LIMITAR A 4 MEDALHAS NA LISTA PARA NÃO QUEBRAR O LAYOUT --- */}
               {badges.length > 0 && (
                   <div className="flex gap-1 mt-1 flex-wrap">
                       {badges.slice(0, 4).map(b => (
-                          <span key={b} className="text-[10px] bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-600/50 cursor-help" title={BADGES_CONFIG[b].title}>
+                          <span 
+                            key={b} 
+                            onClick={(e) => { e.stopPropagation(); alert(`${BADGES_CONFIG[b].emoji} ${BADGES_CONFIG[b].title}:\n${BADGES_CONFIG[b].desc}`); }}
+                            className="text-[10px] bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-600/50 cursor-help hover:scale-110 transition-transform" 
+                          >
                               {BADGES_CONFIG[b].emoji}
                           </span>
                       ))}
-                      {/* Se tiver mais que 4, mostra um indicador "+X" */}
-                      {badges.length > 4 && (
-                          <span className="text-[9px] text-slate-500 flex items-center bg-slate-900/50 px-1 rounded">
-                              +{badges.length - 4}
-                          </span>
-                      )}
+                      {badges.length > 4 && <span className="text-[9px] text-slate-500 flex items-center bg-slate-900/50 px-1 rounded">+{badges.length - 4}</span>}
                   </div>
               )}
 
@@ -978,39 +1060,57 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
 };
 
 // --- NEW MATCH (COM RIVALIDADE ATUALIZADA) ---
+// --- NEW MATCH (ATUALIZADO PARA SALVAR VITÓRIA SIMPLES) ---
+// --- NEW MATCH (LAYOUT CORRIGIDO E RENOMEADO) ---
+// --- NEW MATCH (COM MODO DUPLA + REI DA MESA + PLACAR OPCIONAL) ---
+// --- NEW MATCH (LAYOUT FINAL: ABAS DE MODO + LABELS DINÂMICOS) ---
 const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, config }) => {
+  // Buscas
   const [p1Search, setP1Search] = useState('');
+  const [p1PartnerSearch, setP1PartnerSearch] = useState('');
   const [p2Search, setP2Search] = useState('');
+  const [p2PartnerSearch, setP2PartnerSearch] = useState('');
+  
+  // Estados dos Jogadores
   const [selectedP1, setSelectedP1] = useState(users.find(u => u.uid === currentUser.uid));
+  const [selectedP1Partner, setSelectedP1Partner] = useState(null);
   const [selectedP2, setSelectedP2] = useState(null);
-  const [score1, setScore1] = useState('');
-  const [score2, setScore2] = useState('');
+  const [selectedP2Partner, setSelectedP2Partner] = useState(null);
+  
+  // Estados de Convidado
   const [isGuestP1, setIsGuestP1] = useState(false);
   const [guestNameP1, setGuestNameP1] = useState('');
   const [isGuestP2, setIsGuestP2] = useState(false);
   const [guestNameP2, setGuestNameP2] = useState('');
+
+  const [score1, setScore1] = useState('');
+  const [score2, setScore2] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  // Modos de Jogo
   const [isChilenaMode, setIsChilenaMode] = useState(false);
+  const [isKingMode, setIsKingMode] = useState(false);
+  const [isDoubles, setIsDoubles] = useState(false);
 
   const [currentSeasonId] = useState(() => new Date().toISOString().slice(0, 7));
 
-  // --- LÓGICA DE RIVALIDADE (NOVO) ---
+  const hasScore = score1 !== '' && score2 !== '';
+
+  // --- LÓGICA DE RIVALIDADE ---
   const rivalryStats = useMemo(() => {
-    if (!selectedP1 || !selectedP2 || isGuestP1 || isGuestP2) return null;
+    if (isDoubles || !selectedP1 || !selectedP2 || isGuestP1 || isGuestP2) return null;
     
-    // Filtra jogos entre os dois selecionados
     const history = matches.filter(m => 
-        (m.p1Id === selectedP1.uid && m.p2Id === selectedP2.uid) ||
-        (m.p1Id === selectedP2.uid && m.p2Id === selectedP1.uid)
+        !m.isDoubles && 
+        ((m.p1Id === selectedP1.uid && m.p2Id === selectedP2.uid) ||
+        (m.p1Id === selectedP2.uid && m.p2Id === selectedP1.uid))
     );
 
     let wins1 = 0;
     let wins2 = 0;
 
     history.forEach(m => {
-        // Ignora jogos cancelados/pendentes se quiser, ou usa todos
         if (m.status !== 'confirmed') return;
-
         const p1IsP1InMatch = m.p1Id === selectedP1.uid;
         const s1 = p1IsP1InMatch ? m.s1 : m.s2;
         const s2 = p1IsP1InMatch ? m.s2 : m.s1;
@@ -1032,14 +1132,21 @@ const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, co
         statusColor = "text-emerald-400";
     } else if (diff <= -3) {
         statusLabel = `🦆 ${selectedP1.displayName} é Freguês!`;
-        statusColor = "text-amber-400"; // Amarelo de pato
+        statusColor = "text-amber-400"; 
     }
 
     return { wins1, wins2, total, statusLabel, statusColor };
-  }, [selectedP1, selectedP2, matches, isGuestP1, isGuestP2]);
+  }, [selectedP1, selectedP2, matches, isGuestP1, isGuestP2, isDoubles]);
 
+  const getAvailableUsers = (search, ...excludedUids) => {
+      const excluded = excludedUids.filter(id => id); 
+      return users.filter(u => 
+          !excluded.includes(u.uid) && 
+          u.displayName.toLowerCase().includes(search.toLowerCase())
+      );
+  };
 
-  // --- EFEITOS VISUAIS ---
+  // --- EFEITOS ---
   const triggerWinConfetti = () => {
       const colors = ['#10b981', '#3b82f6', '#f59e0b']; 
       confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 }, colors: colors, zIndex: 9999 });
@@ -1059,12 +1166,6 @@ const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, co
       }, 250);
   };
 
-  const isUserBanned = selectedP1 && !isGuestP1 && isPlayerBanned(selectedP1, config);
-  
-  if (isUserBanned && !isAdmin) return <div className="p-6 text-center"><AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" /><h2 className="text-xl font-bold text-white mb-2">Suspenso!</h2><button onClick={onClose} className="bg-slate-700 text-white px-4 py-2 rounded-lg">Voltar</button></div>;
-
-  const filterUsers = (search, excludeUid) => users.filter(u => (excludeUid ? u.uid !== excludeUid : true) && u.displayName.toLowerCase().includes(search.toLowerCase()));
-
   const UserOption = ({ user, onClick }) => (
       <button type="button" onClick={onClick} className="w-full text-left px-4 py-3 hover:bg-slate-700 text-slate-200 border-b border-slate-700/50 flex items-center justify-between">
         <div className="flex items-center gap-3"><AvatarDisplay avatar={user.avatar} size="sm" /><div><span className="block font-bold">{user.displayName}</span><span className="text-[10px] text-slate-400">{user.isOffline ? 'Sem Conta' : user.email}</span></div></div>
@@ -1072,35 +1173,56 @@ const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, co
       </button>
   );
 
-  const handleSubmit = async (winnerSide) => {
-    const isChilenaSubmit = typeof winnerSide === 'string';
-    
-    if (!isChilenaSubmit && (!score1 || !score2)) return;
+  const handleSubmit = async (winType) => {
     if (!isGuestP1 && !selectedP1) return;
     if (!isGuestP2 && !selectedP2) return;
+    if (isDoubles && (!selectedP1Partner || !selectedP2Partner)) return alert("Selecione as duplas completas!");
 
     setLoading(true);
     try {
       const matchData = { 
           createdAt: serverTimestamp(), 
           createdBy: currentUser.uid, 
-          isChilena: isChilenaSubmit,
-          seasonId: currentSeasonId
+          seasonId: currentSeasonId,
+          isChilena: false,
+          isSimpleWin: false,
+          isDoubles: isDoubles
       };
 
       if (isGuestP1) { matchData.p1Name = guestNameP1 || 'Convidado 1'; matchData.p1Id = 'guest_' + Date.now() + '_1'; } 
       else { matchData.p1Name = selectedP1.displayName; matchData.p1Id = selectedP1.uid; }
+      
+      if (isDoubles && selectedP1Partner) {
+          matchData.p1PartnerName = selectedP1Partner.displayName;
+          matchData.p1PartnerId = selectedP1Partner.uid;
+      }
 
       if (isGuestP2) { matchData.p2Name = guestNameP2 || 'Convidado 2'; matchData.p2Id = 'guest_' + Date.now() + '_2'; } 
       else { matchData.p2Name = selectedP2.displayName; matchData.p2Id = selectedP2.uid; }
 
-      if (isChilenaSubmit) {
-          if (winnerSide === 'p1') { matchData.s1 = 7; matchData.s2 = 0; }
-          else { matchData.s1 = 0; matchData.s2 = 7; }
-      } else {
-          matchData.s1 = parseInt(score1);
-          matchData.s2 = parseInt(score2);
+      if (isDoubles && selectedP2Partner) {
+          matchData.p2PartnerName = selectedP2Partner.displayName;
+          matchData.p2PartnerId = selectedP2Partner.uid;
       }
+
+      let s1Final = 0, s2Final = 0;
+
+      if (winType === 'score') {
+          if (!score1 || !score2) return;
+          s1Final = parseInt(score1);
+          s2Final = parseInt(score2);
+      } else if (winType === 'p1_chilena') {
+          s1Final = 7; s2Final = 0; matchData.isChilena = true;
+      } else if (winType === 'p2_chilena') {
+          s1Final = 0; s2Final = 7; matchData.isChilena = true;
+      } else if (winType === 'p1_simple') {
+          s1Final = 1; s2Final = 0; matchData.isSimpleWin = true; 
+      } else if (winType === 'p2_simple') {
+          s1Final = 0; s2Final = 1; matchData.isSimpleWin = true; 
+      }
+
+      matchData.s1 = s1Final;
+      matchData.s2 = s2Final;
 
       let newStatus = 'pending_user';
       let confBy = null;
@@ -1109,11 +1231,7 @@ const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, co
       if (isAdmin) {
           newStatus = 'confirmed'; confBy = 'admin_scribe'; confAt = serverTimestamp();
       } else {
-          if ((selectedP2 && !selectedP2.isOffline && !isGuestP2)) {
-              newStatus = 'pending_user'; 
-          } else {
-              newStatus = 'pending_guest'; 
-          }
+          newStatus = 'pending_guest'; 
       }
 
       matchData.status = newStatus;
@@ -1122,29 +1240,98 @@ const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, co
       
       const docRef = await addDoc(collection(db, getCollectionPath('matches')), matchData);
       
-      if (isChilenaSubmit) {
-          triggerChilenaEffect();
+      if (matchData.isChilena) triggerChilenaEffect();
+      else triggerWinConfetti();
+
+      if (isKingMode && newStatus === 'confirmed') {
+          const p1Won = s1Final > s2Final;
+
+          if (!p1Won) {
+              if (isGuestP2) {
+                  setIsGuestP1(true);
+                  setGuestNameP1(guestNameP2);
+                  setSelectedP1(null);
+                  setSelectedP1Partner(null);
+              } else {
+                  setIsGuestP1(false);
+                  setSelectedP1(selectedP2);
+                  if (isDoubles) setSelectedP1Partner(selectedP2Partner);
+              }
+          }
+
+          setIsGuestP2(false);
+          setGuestNameP2('');
+          setSelectedP2(null);
+          setSelectedP2Partner(null);
+          setScore1('');
+          setScore2('');
+          setLoading(false);
+          
+          alert('👑 Vencedores continuam! Quem são os próximos desafiantes?');
       } else {
-          triggerWinConfetti();
+          onSuccess(docRef.id, matchData.status);
       }
 
-      onSuccess(docRef.id, matchData.status);
     } catch (err) { alert('Erro: ' + err.message); setLoading(false); }
   };
 
   const isAutoConfirmButton = isAdmin;
 
+  const renderPartnerInput = (label, selected, setSelected, search, setSearch, ...excludes) => (
+      <div className="relative mt-2 pl-4 border-l-2 border-slate-700 animate-in slide-in-from-top-2">
+          <label className="text-[10px] text-slate-500 font-bold uppercase mb-1 block">{label}</label>
+          {!selected ? (
+              <div className="relative">
+                  <input type="text" placeholder="Buscar parceiro..." className="w-full bg-slate-900/50 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none" value={search} onChange={(e) => setSearch(e.target.value)} />
+                  {search && <div className="absolute top-full left-0 right-0 bg-slate-800 border border-slate-700 rounded-b-lg mt-1 z-20 max-h-40 overflow-y-auto shadow-xl">
+                      {getAvailableUsers(search, ...excludes).map(u => <UserOption key={u.uid} user={u} onClick={() => { setSelected(u); setSearch(''); }} />)}
+                  </div>}
+              </div>
+          ) : (
+              <div className="bg-slate-800/50 p-2 rounded-lg flex items-center justify-between border border-slate-600/50">
+                  <div className="flex items-center gap-2"><AvatarDisplay avatar={selected.avatar} size="xs" /><span className="font-bold text-sm text-white">{selected.displayName}</span></div>
+                  <button onClick={() => setSelected(null)} className="text-xs text-slate-400 hover:text-white"><XCircle className="w-4 h-4" /></button>
+              </div>
+          )}
+      </div>
+  );
+
   return (
-    <div className="space-y-6 relative z-10">
-      <h2 className="text-xl font-bold text-white flex items-center gap-2"><PlusCircle className="text-emerald-400" /> Registrar Partida</h2>
+    <div className="space-y-6 relative z-10 pt-4">
+      {/* CABEÇALHO */}
+      <div className="text-center pb-2">
+        <h2 className="text-xl font-bold text-white flex items-center justify-center gap-2"><PlusCircle className="text-emerald-400" /> Registrar</h2>
+      </div>
+
+      {/* --- SELETOR DE MODO (ABAS) --- */}
+      <div className="bg-slate-900 p-1 rounded-xl flex gap-1 border border-slate-700">
+          <button 
+            onClick={() => { setIsDoubles(false); setSelectedP1Partner(null); setSelectedP2Partner(null); }}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${!isDoubles ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+              👤 Solo (1x1)
+          </button>
+          <button 
+            onClick={() => setIsDoubles(true)}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${isDoubles ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+              👥 Dupla (2x2)
+          </button>
+      </div>
       
+      {/* --- TIME/JOGADOR 1 --- */}
       <div className="space-y-1">
-        <label className="text-slate-400 text-xs font-bold ml-1">JOGADOR 1</label>
+        {/* MUDANÇA: LABEL DINÂMICA (TIME OU JOGADOR) */}
+        <label className="text-slate-400 text-xs font-bold ml-1 flex justify-between">
+            {isDoubles ? 'TIME 1' : 'JOGADOR 1'} 
+            {isKingMode && <span className="text-indigo-400 text-[10px]">(Vencedores)</span>}
+        </label>
+        
         {!selectedP1 && !isGuestP1 ? (
           <div className="relative">
-            <input type="text" placeholder="Buscar J1..." className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none" value={p1Search} onChange={(e) => setP1Search(e.target.value)} />
-            {p1Search && <div className="absolute top-full left-0 right-0 bg-slate-800 border border-slate-700 rounded-b-lg mt-1 z-10 max-h-64 overflow-y-auto shadow-xl">
-                {filterUsers(p1Search, null).map(u => <UserOption key={u.uid} user={u} onClick={() => { setSelectedP1(u); setP1Search(''); }} />)}
+            <input type="text" placeholder={isDoubles ? "Buscar Capitão..." : "Buscar Jogador..."} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none" value={p1Search} onChange={(e) => setP1Search(e.target.value)} />
+            {p1Search && <div className="absolute top-full left-0 right-0 bg-slate-800 border border-slate-700 rounded-b-lg mt-1 z-20 max-h-64 overflow-y-auto shadow-xl">
+                {getAvailableUsers(p1Search, selectedP2?.uid, selectedP2Partner?.uid).map(u => <UserOption key={u.uid} user={u} onClick={() => { setSelectedP1(u); setP1Search(''); }} />)}
                 <button type="button" onClick={() => setIsGuestP1(true)} className="w-full text-left px-4 py-3 bg-slate-700/50 hover:bg-slate-700 text-emerald-400 font-medium">+ Convidado</button>
             </div>}
           </div>
@@ -1157,19 +1344,28 @@ const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, co
             ) : (
                 <div className="bg-slate-800 p-3 rounded-lg flex items-center justify-between border border-slate-600">
                     <div className="flex items-center gap-2"><AvatarDisplay avatar={selectedP1.avatar} size="sm" /><span className="font-bold text-white">{selectedP1.displayName}</span></div>
-                    <button onClick={() => setSelectedP1(null)} className="text-xs text-slate-400 hover:text-white"><RefreshCw className="w-4 h-4" /></button>
+                    <button onClick={() => { setSelectedP1(null); setSelectedP1Partner(null); }} className="text-xs text-slate-400 hover:text-white"><RefreshCw className="w-4 h-4" /></button>
                 </div>
             )
         )}
+        
+        {/* PARCEIRO TIME 1 (Só aparece se modo dupla estiver ON) */}
+        {isDoubles && !isGuestP1 && selectedP1 && renderPartnerInput('Parceiro Time 1', selectedP1Partner, setSelectedP1Partner, p1PartnerSearch, setP1PartnerSearch, selectedP1?.uid, selectedP2?.uid, selectedP2Partner?.uid)}
       </div>
 
-      <div className="space-y-1">
-        <label className="text-slate-400 text-xs font-bold ml-1">JOGADOR 2</label>
+      {/* --- TIME/JOGADOR 2 --- */}
+      <div className="space-y-1 mt-4">
+        {/* MUDANÇA: LABEL DINÂMICA */}
+        <label className="text-slate-400 text-xs font-bold ml-1 flex justify-between">
+            {isDoubles ? 'TIME 2' : 'JOGADOR 2'}
+            {isKingMode && <span className="text-indigo-400 text-[10px]">(Desafiantes)</span>}
+        </label>
+
         {!selectedP2 && !isGuestP2 ? (
           <div className="relative">
-            <input type="text" placeholder="Buscar J2..." className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none" value={p2Search} onChange={(e) => setP2Search(e.target.value)} />
-            {p2Search && <div className="absolute top-full left-0 right-0 bg-slate-800 border border-slate-700 rounded-b-lg mt-1 z-10 max-h-64 overflow-y-auto shadow-xl">
-                {filterUsers(p2Search, selectedP1?.uid).map(u => <UserOption key={u.uid} user={u} onClick={() => { setSelectedP2(u); setP2Search(''); }} />)}
+            <input type="text" placeholder={isDoubles ? "Buscar Capitão..." : "Buscar Jogador..."} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none" value={p2Search} onChange={(e) => setP2Search(e.target.value)} />
+            {p2Search && <div className="absolute top-full left-0 right-0 bg-slate-800 border border-slate-700 rounded-b-lg mt-1 z-20 max-h-64 overflow-y-auto shadow-xl">
+                {getAvailableUsers(p2Search, selectedP1?.uid, selectedP1Partner?.uid, selectedP2Partner?.uid).map(u => <UserOption key={u.uid} user={u} onClick={() => { setSelectedP2(u); setP2Search(''); }} />)}
                 <button type="button" onClick={() => setIsGuestP2(true)} className="w-full text-left px-4 py-3 bg-slate-700/50 hover:bg-slate-700 text-emerald-400 font-medium">+ Convidado</button>
             </div>}
           </div>
@@ -1182,13 +1378,16 @@ const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, co
             ) : (
                 <div className="bg-slate-800 p-3 rounded-lg flex items-center justify-between border border-emerald-500/30">
                     <div className="flex items-center gap-2"><AvatarDisplay avatar={selectedP2.avatar} size="sm" /><span className="font-bold text-emerald-400">{selectedP2.displayName}</span></div>
-                    <button onClick={() => setSelectedP2(null)} className="text-xs text-slate-400 hover:text-white"><RefreshCw className="w-4 h-4" /></button>
+                    <button onClick={() => { setSelectedP2(null); setSelectedP2Partner(null); }} className="text-xs text-slate-400 hover:text-white"><RefreshCw className="w-4 h-4" /></button>
                 </div>
             )
         )}
+
+        {/* PARCEIRO TIME 2 */}
+        {isDoubles && !isGuestP2 && selectedP2 && renderPartnerInput('Parceiro Time 2', selectedP2Partner, setSelectedP2Partner, p2PartnerSearch, setP2PartnerSearch, selectedP1?.uid, selectedP1Partner?.uid, selectedP2?.uid)}
       </div>
 
-      {/* --- BLOCO DE RIVALIDADE (NOVO) --- */}
+      {/* RIVALIDADE (SÓ NO X1) */}
       {rivalryStats && (
         <div className="bg-slate-900/50 border border-slate-700/50 p-3 rounded-xl animate-in fade-in zoom-in-95">
             <div className="flex justify-between items-center text-xs text-slate-400 mb-2 uppercase font-bold tracking-wider">
@@ -1213,6 +1412,17 @@ const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, co
         </div>
       )}
 
+      {/* BOTÃO REI DA MESA */}
+      <div className="flex justify-center">
+        <button 
+            type="button" 
+            onClick={() => setIsKingMode(!isKingMode)} 
+            className={`w-full text-xs font-bold py-2 rounded-lg border flex items-center justify-center gap-2 transition-all ${isKingMode ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.3)]' : 'bg-slate-800/50 text-slate-500 border-slate-700 hover:bg-slate-800'}`}
+        >
+            {isKingMode ? '🔥 Vitórias Consecutivas: ATIVADO' : '🔄 Ativar Vitórias Consecutivas'}
+        </button>
+      </div>
+
       <div className="flex justify-end">
           <button type="button" onClick={() => setIsChilenaMode(!isChilenaMode)} className={`text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1 border transition-all ${isChilenaMode ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500' : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
               <Zap className="w-3 h-3" fill={isChilenaMode ? "currentColor" : "none"} /> Modo Chilena {isChilenaMode ? 'ATIVADO' : ''}
@@ -1221,23 +1431,54 @@ const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, co
 
       {isChilenaMode ? (
           <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2">
-              <button onClick={() => handleSubmit('p1')} disabled={loading || ((!selectedP1 && !isGuestP1) || (!selectedP2 && !isGuestP2))} className="bg-slate-800 border-2 border-slate-600 hover:border-yellow-500 hover:bg-yellow-500/10 p-4 rounded-xl flex flex-col items-center gap-2 disabled:opacity-50">
-                  <Zap className="w-8 h-8 text-yellow-400" fill="currentColor" /><span className="text-xs font-bold text-yellow-100">J1 Aplicou Chilena</span>
+              <button onClick={() => handleSubmit('p1_chilena')} disabled={loading} className="bg-slate-800 border-2 border-slate-600 hover:border-yellow-500 hover:bg-yellow-500/10 p-4 rounded-xl flex flex-col items-center gap-2 disabled:opacity-50">
+                  <Zap className="w-8 h-8 text-yellow-400" fill="currentColor" /><span className="text-xs font-bold text-yellow-100">{isDoubles ? 'Time 1' : 'J1'} Aplicou Chilena</span>
               </button>
-              <button onClick={() => handleSubmit('p2')} disabled={loading || ((!selectedP1 && !isGuestP1) || (!selectedP2 && !isGuestP2))} className="bg-slate-800 border-2 border-slate-600 hover:border-yellow-500 hover:bg-yellow-500/10 p-4 rounded-xl flex flex-col items-center gap-2 disabled:opacity-50">
-                  <Zap className="w-8 h-8 text-yellow-400" fill="currentColor" /><span className="text-xs font-bold text-yellow-100">J2 Aplicou Chilena</span>
+              <button onClick={() => handleSubmit('p2_chilena')} disabled={loading} className="bg-slate-800 border-2 border-slate-600 hover:border-yellow-500 hover:bg-yellow-500/10 p-4 rounded-xl flex flex-col items-center gap-2 disabled:opacity-50">
+                  <Zap className="w-8 h-8 text-yellow-400" fill="currentColor" /><span className="text-xs font-bold text-yellow-100">{isDoubles ? 'Time 2' : 'J2'} Aplicou Chilena</span>
               </button>
           </div>
       ) : (
           <>
             <div className="grid grid-cols-2 gap-4">
-                <div className="text-center"><label className="block text-slate-400 text-xs mb-1">Placar J1</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 text-center text-2xl font-bold text-white focus:ring-2 focus:ring-emerald-500 outline-none" value={score1} onChange={(e) => setScore1(e.target.value)} /></div>
-                <div className="text-center"><label className="block text-slate-400 text-xs mb-1">Placar J2</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 text-center text-2xl font-bold text-white focus:ring-2 focus:ring-emerald-500 outline-none" value={score2} onChange={(e) => setScore2(e.target.value)} /></div>
+                <div className="text-center"><label className="block text-slate-400 text-xs mb-1">Placar {isDoubles ? 'Time 1' : 'J1'}</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 text-center text-2xl font-bold text-white focus:ring-2 focus:ring-emerald-500 outline-none placeholder-slate-700" placeholder="-" value={score1} onChange={(e) => setScore1(e.target.value)} /></div>
+                <div className="text-center"><label className="block text-slate-400 text-xs mb-1">Placar {isDoubles ? 'Time 2' : 'J2'}</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 text-center text-2xl font-bold text-white focus:ring-2 focus:ring-emerald-500 outline-none placeholder-slate-700" placeholder="-" value={score2} onChange={(e) => setScore2(e.target.value)} /></div>
             </div>
             
-            <button onClick={handleSubmit} disabled={loading || ((!selectedP1 && !isGuestP1) || (!selectedP2 && !isGuestP2))} className={`w-full text-white font-bold py-4 rounded-xl transition-all shadow-lg mt-4 flex justify-center items-center gap-2 ${isAdmin ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'} disabled:bg-slate-700 disabled:text-slate-500`}>
-                {loading ? '...' : (isAutoConfirmButton ? 'Registrar (Auto-Confirmar)' : 'Enviar para Confirmação')}
-            </button>
+            {hasScore ? (
+                <button 
+                    onClick={() => handleSubmit('score')} 
+                    disabled={loading} 
+                    className={`w-full text-white font-bold py-4 rounded-xl transition-all shadow-lg mt-4 flex justify-center items-center gap-2 ${isAdmin ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'} disabled:bg-slate-700 disabled:text-slate-500 animate-in zoom-in-95`}
+                >
+                    {loading ? '...' : (isAutoConfirmButton ? (isKingMode ? 'Registrar & Manter' : 'Registrar Placar') : 'Enviar Placar')}
+                </button>
+            ) : (
+                <div className="mt-4">
+                    <p className="text-center text-[10px] text-slate-500 mb-2 font-bold uppercase tracking-widest">Sem placar? Selecione o vencedor:</p>
+                    <div className="grid grid-cols-2 gap-3">
+                        <button 
+                            onClick={() => handleSubmit('p1_simple')}
+                            disabled={loading}
+                            className="bg-slate-800 border border-slate-600 hover:bg-emerald-900/30 hover:border-emerald-500/50 p-3 rounded-xl flex flex-col items-center gap-1 disabled:opacity-50 transition-colors"
+                        >
+                            <span className="text-xl">🏆</span>
+                            <span className="text-xs font-bold text-white line-clamp-1">{isDoubles ? 'TIME 1' : (selectedP1 ? selectedP1.displayName : (guestNameP1 || 'J1'))}</span>
+                            <span className="text-[9px] text-emerald-400">VENCEU</span>
+                        </button>
+
+                        <button 
+                            onClick={() => handleSubmit('p2_simple')}
+                            disabled={loading}
+                            className="bg-slate-800 border border-slate-600 hover:bg-emerald-900/30 hover:border-emerald-500/50 p-3 rounded-xl flex flex-col items-center gap-1 disabled:opacity-50 transition-colors"
+                        >
+                            <span className="text-xl">🏆</span>
+                            <span className="text-xs font-bold text-white line-clamp-1">{isDoubles ? 'TIME 2' : (selectedP2 ? selectedP2.displayName : (guestNameP2 || 'J2'))}</span>
+                            <span className="text-[9px] text-emerald-400">VENCEU</span>
+                        </button>
+                    </div>
+                </div>
+            )}
           </>
       )}
     </div>
@@ -1671,7 +1912,7 @@ export default function App() {
             </>
         )}
         
-        {view === 'newMatch' && user && (<div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-xl relative"><button onClick={() => setView('dashboard')} className="absolute top-4 right-4 text-slate-400 hover:text-white"><XCircle /></button><NewMatch matches={matchesList} users={usersList} currentUser={user} isAdmin={isAdmin} onClose={() => setView('dashboard')} onSuccess={(id, status) => { if (status === 'pending_guest') setPendingConfirmationMatchId(id); else { setView('dashboard'); alert(status === 'confirmed' ? 'Partida registrada!' : 'Partida enviada para confirmação!'); } }} config={config} /></div>)}
+        {view === 'newMatch' && user && (<div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-xl relative"><button onClick={() => setView('dashboard')} className="absolute top-4 right-4 text-slate-400 hover:text-white z-50"><XCircle /></button><NewMatch matches={matchesList} users={usersList} currentUser={user} isAdmin={isAdmin} onClose={() => setView('dashboard')} onSuccess={(id, status) => { if (status === 'pending_guest') setPendingConfirmationMatchId(id); else { setView('dashboard'); alert(status === 'confirmed' ? 'Partida registrada!' : 'Partida enviada para confirmação!'); } }} config={config} /></div>)}
         
         {view === 'history' && (
             <div className="space-y-4">
@@ -1706,35 +1947,149 @@ export default function App() {
                         <button onClick={() => setHistoryDate('')} className="text-emerald-400 text-sm mt-2 hover:underline">Ver todo o histórico</button>
                     </div>
                 ) : (
-                    filteredHistory.map(m => (
-                        <div key={m.id} className="bg-slate-800 p-4 rounded-lg border border-slate-700 flex flex-col gap-2">
-                            <div className="flex justify-between items-center">
-                                <div className="flex flex-col">
-                                    <span className="text-slate-300 font-bold">{m.p1Name} <span className="text-emerald-400">{m.s1}</span></span>
-                                    <span className="text-slate-300 font-bold">{m.p2Name} <span className="text-emerald-400">{m.s2}</span></span>
-                                    <span className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                                        <Clock className="w-3 h-3" /> 
-                                        {m.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 
-                                        <span className="mx-1">•</span>
-                                        {m.status === 'confirmed' ? 'Confirmado' : 'Pendente'}
+                    filteredHistory.map(m => {
+                        // Helpers para identificar vencedor
+                        const p1Won = m.s1 > m.s2;
+                        const isDraw = m.s1 === m.s2; // Raro, mas possível em testes
+
+                        return (
+                            <div key={m.id} className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-sm relative">
+                                {/* Cabeçalho do Card (Data e Status) */}
+                                <div className="bg-slate-900/50 px-3 py-1.5 flex justify-between items-center border-b border-slate-700/50">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                                        <Clock className="w-3 h-3" />
+                                        {m.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        {m.isDoubles && <span className="ml-2 text-blue-400 bg-blue-900/20 px-1.5 rounded border border-blue-500/20">DUPLA</span>}
                                     </span>
+                                    
+                                    {/* Status da Partida */}
+                                    {m.status === 'confirmed' ? (
+                                        <div className="flex items-center gap-1 text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                                            <CheckCircle className="w-3 h-3" /> Confirmado
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-1 text-[10px] text-amber-500 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full animate-pulse">
+                                            <History className="w-3 h-3" /> Pendente
+                                        </div>
+                                    )}
                                 </div>
-                                {m.status === 'confirmed' && <CheckCircle className="text-emerald-500/20 w-6 h-6" />}
-                                {m.status !== 'confirmed' && <History className="text-amber-500/50 w-6 h-6 animate-pulse" />}
+
+                                {/* Corpo do Placar */}
+                                {/* Corpo do Placar */}
+                                <div className="p-3 flex flex-col gap-2">
+                                    
+                                    {/* LINHA TIME 1 */}
+                                    <div className={`flex justify-between items-center p-2 rounded-lg transition-colors ${p1Won ? 'bg-gradient-to-r from-emerald-900/20 to-transparent border-l-2 border-emerald-500' : 'opacity-70'}`}>
+                                        <div className="flex flex-col">
+                                            <span className={`font-bold text-sm ${p1Won ? 'text-white' : 'text-slate-400'}`}>
+                                                {m.p1Name}
+                                            </span>
+                                            {m.p1PartnerName && (
+                                                <span className="text-xs text-slate-500 flex items-center gap-1">
+                                                    <span className="text-[9px] bg-slate-700 px-1 rounded">e</span> {m.p1PartnerName}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-right flex items-center gap-2">
+                                            {/* ETIQUETA DA VERGONHA J1 */}
+                                            {!p1Won && m.s1 === 4 && !m.isSimpleWin && (
+                                                <span className="text-[8px] font-black text-pink-500 border border-pink-500/50 px-1 rounded bg-pink-500/10 transform -rotate-6">
+                                                    👠 PUTA
+                                                </span>
+                                            )}
+                                            
+                                            {m.isSimpleWin ? (
+                                                p1Won ? <Trophy className="w-5 h-5 text-yellow-400 drop-shadow-md" /> : <span className="text-slate-600 font-bold text-lg">—</span>
+                                            ) : (
+                                                <span className={`text-xl font-black ${p1Won ? 'text-emerald-400' : 'text-slate-500'}`}>{m.s1}</span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* LINHA TIME 2 */}
+                                    <div className={`flex justify-between items-center p-2 rounded-lg transition-colors ${!p1Won ? 'bg-gradient-to-r from-emerald-900/20 to-transparent border-l-2 border-emerald-500' : 'opacity-70'}`}>
+                                        <div className="flex flex-col">
+                                            <span className={`font-bold text-sm ${!p1Won ? 'text-white' : 'text-slate-400'}`}>
+                                                {m.p2Name}
+                                            </span>
+                                            {m.p2PartnerName && (
+                                                <span className="text-xs text-slate-500 flex items-center gap-1">
+                                                    <span className="text-[9px] bg-slate-700 px-1 rounded">e</span> {m.p2PartnerName}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-right flex items-center gap-2">
+                                            {/* ETIQUETA DA VERGONHA J2 */}
+                                            {p1Won && m.s2 === 4 && !m.isSimpleWin && (
+                                                <span className="text-[8px] font-black text-pink-500 border border-pink-500/50 px-1 rounded bg-pink-500/10 transform -rotate-6">
+                                                    👠 PUTA
+                                                </span>
+                                            )}
+
+                                            {m.isSimpleWin ? (
+                                                !p1Won ? <Trophy className="w-5 h-5 text-yellow-400 drop-shadow-md" /> : <span className="text-slate-600 font-bold text-lg">—</span>
+                                            ) : (
+                                                <span className={`text-xl font-black ${!p1Won ? 'text-emerald-400' : 'text-slate-500'}`}>{m.s2}</span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                </div>
+
+                                {/* Rodapé (Ações) */}
+                               {/* Rodapé (Ações) */}
+                                {(m.isChilena || (user && (m.status !== 'confirmed' || isAdmin))) && (
+                                    <div className="px-3 pb-3 pt-0 flex justify-between items-center">
+                                        <div>
+                                            {m.isChilena && (
+                                                <span className="text-[9px] font-bold text-yellow-500 bg-yellow-500/10 px-2 py-1 rounded border border-yellow-500/20 flex items-center gap-1">
+                                                    <Zap className="w-3 h-3 fill-yellow-500" /> CHILENA
+                                                </span>
+                                            )}
+                                        </div>
+                                        
+                                        {/* Botões de Ação */}
+                                        {(m.status !== 'confirmed' || isAdmin) && user && (
+                                            <div className="flex gap-2">
+                                                {/* QR Code (Apenas criador vê) */}
+                                                {m.createdBy === user.uid && m.p2Id.startsWith('guest_') && (
+                                                    <button onClick={() => setPendingConfirmationMatchId(m.id)} className="p-1.5 bg-slate-700 text-white rounded hover:bg-slate-600"><QrCode className="w-4 h-4" /></button>
+                                                )}
+                                                
+                                                {/* Botão Cancelar (Criador) - SÓ APARECE SE NÃO FOR ADMIN (pra não duplicar) */}
+                                                {m.createdBy === user.uid && !isAdmin && (
+                                                    <button onClick={() => handleDeleteMatch(m.id)} className="p-1.5 bg-red-900/30 text-red-400 rounded hover:bg-red-900/50" title="Cancelar">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                )}
+
+                                                {/* Botão Confirmar (Jogador 2) */}
+                                                {m.p2Id === user.uid && (
+                                                    <button onClick={() => handleP2Confirm(m.id)} className="p-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-500" title="Confirmar">
+                                                        <Check className="w-4 h-4" />
+                                                    </button>
+                                                )}
+
+                                                {/* Botões de Admin (Validar e Excluir) */}
+                                                {isAdmin && (
+                                                    <>
+                                                        {m.status !== 'confirmed' && (
+                                                            <button onClick={() => handleForceConfirm(m.id)} className="p-1.5 bg-amber-600 text-white rounded hover:bg-amber-500" title="Validar Forçado">
+                                                                <Check className="w-4 h-4" />
+                                                            </button>
+                                                        )}
+                                                        <button onClick={() => handleDeleteMatch(m.id)} className="p-1.5 bg-red-600 text-white rounded hover:bg-red-500" title="Excluir (Admin)">
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
-                            
-                            {m.isChilena && <div className="flex justify-center"><span className="text-[10px] text-yellow-400 font-bold flex items-center gap-1 bg-yellow-500/10 px-2 py-0.5 rounded border border-yellow-500/30"><Zap className="w-3 h-3" fill="currentColor" /> CHILENA APLICADA</span></div>}
-                            
-                            {(m.status !== 'confirmed' || isAdmin) && user && (
-                                <div className="flex gap-2 justify-end mt-2 border-t border-slate-700 pt-2 flex-wrap">
-                                    {m.createdBy === user.uid && m.p2Id.startsWith('guest_') && (<button onClick={() => setPendingConfirmationMatchId(m.id)} className="text-xs bg-slate-700 text-white px-3 py-1 rounded border border-slate-600 flex items-center gap-1 hover:bg-slate-600"><QrCode className="w-3 h-3" /> Ver QR Code</button>)}
-                                    {m.createdBy === user.uid && (<button onClick={() => handleDeleteMatch(m.id)} className="text-xs bg-red-900/20 text-red-400 px-3 py-1 rounded border border-red-900/50 flex items-center gap-1 hover:bg-red-900/40"><Trash2 className="w-3 h-3" /> Cancelar</button>)}
-                                    {m.p2Id === user.uid && (<button onClick={() => handleP2Confirm(m.id)} className="text-xs bg-emerald-900/20 text-emerald-400 px-3 py-1 rounded border border-emerald-900/50 flex items-center gap-1 hover:bg-emerald-900/40"><Check className="w-3 h-3" /> Confirmar</button>)}
-                                    {isAdmin && (<><button onClick={() => handleForceConfirm(m.id)} className="text-xs bg-amber-900/20 text-amber-400 px-3 py-1 rounded border border-amber-900/50 flex items-center gap-1 hover:bg-amber-900/40"><Check className="w-3 h-3" /> Validar</button><button onClick={() => handleDeleteMatch(m.id)} className="text-xs bg-red-900/20 text-red-400 px-3 py-1 rounded border border-red-900/50 flex items-center gap-1 hover:bg-red-900/40"><Trash2 className="w-3 h-3" /> Excluir</button></>)}
-                                </div>
-                            )}
-                        </div>
-                    ))
+                        );
+                    })
                 )}
             </div>
         )}
