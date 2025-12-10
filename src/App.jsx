@@ -87,11 +87,22 @@ const DEFAULT_CONFIG = {
   banThresholdOwner: 3
 };
 
+// --- INICIALIZAÇÃO SEGURA DO FIREBASE ---
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-});
+
+let db;
+try {
+  // Tenta iniciar com suporte Offline (Cache)
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+  });
+  console.log("🔥 Banco de dados Offline ATIVADO com sucesso!");
+} catch (e) {
+  // Se der erro (ex: já foi iniciado pelo React), pega a instância normal
+  console.warn("⚠️ Firestore já estava iniciado ou erro no cache, usando modo padrão.");
+  db = getFirestore(app);
+};
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'pingpong-app';
 
 const getCollectionPath = (colName) => `artifacts/${appId}/public/data/${colName}`;
