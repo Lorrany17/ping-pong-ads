@@ -979,8 +979,9 @@ const RankingList = ({ matches, users, period, onSelectPlayer, config }) => {
       if (!isConfirmed) return; 
 
       if (period !== 'all') {
-          if (!m.createdAt) return; 
-          if (!dateFilters[period](m.createdAt.toDate())) return; 
+          // CORREÇÃO OFFLINE: Usa data atual se estiver pendente
+          const matchDate = m.createdAt ? m.createdAt.toDate() : new Date();
+          if (!dateFilters[period](matchDate)) return; 
       }
 
       const s1 = Number(m.s1 || 0);
@@ -1456,22 +1457,31 @@ const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, co
                 <div className="text-center"><label className="block text-slate-400 text-xs mb-1">Placar {isDoubles ? 'Time 2' : 'J2'}</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 text-center text-2xl font-bold text-white focus:ring-2 focus:ring-emerald-500 outline-none placeholder-slate-700" placeholder="-" value={score2} onChange={(e) => setScore2(e.target.value)} /></div>
             </div>
             
+            {/* BOTÕES DE CONFIRMAÇÃO INTELIGENTES */}
             {hasScore ? (
                 <button 
                     onClick={() => handleSubmit('score')} 
-                    disabled={loading} 
-                    className={`w-full text-white font-bold py-4 rounded-xl transition-all shadow-lg mt-4 flex justify-center items-center gap-2 ${isAdmin ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'} disabled:bg-slate-700 disabled:text-slate-500 animate-in zoom-in-95`}
+                    // BLOQUEIA SE NÃO TIVER JOGADOR 2 SELECIONADO
+                    disabled={loading || (!isGuestP1 && !selectedP1) || (!isGuestP2 && !selectedP2)} 
+                    className={`w-full font-bold py-4 rounded-xl transition-all shadow-lg mt-4 flex justify-center items-center gap-2 animate-in zoom-in-95
+                        ${(!isGuestP2 && !selectedP2) ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : (isAdmin ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white')}
+                    `}
                 >
-                    {loading ? '...' : (isAutoConfirmButton ? (isKingMode ? 'Registrar & Manter' : 'Registrar Placar') : 'Enviar Placar')}
+                    {loading ? '...' : (
+                        (!isGuestP2 && !selectedP2) ? 'Selecione o Oponente...' : // AVISO VISUAL
+                        (isAutoConfirmButton ? (isKingMode ? 'Registrar & Manter' : 'Registrar Placar') : 'Enviar Placar')
+                    )}
                 </button>
             ) : (
                 <div className="mt-4">
-                    <p className="text-center text-[10px] text-slate-500 mb-2 font-bold uppercase tracking-widest">Sem placar? Selecione o vencedor:</p>
+                    <p className="text-center text-[10px] text-slate-500 mb-2 font-bold uppercase tracking-widest">
+                        {(!isGuestP2 && !selectedP2) ? 'Selecione o oponente para continuar...' : 'Sem placar? Selecione o vencedor:'}
+                    </p>
                     <div className="grid grid-cols-2 gap-3">
                         <button 
                             onClick={() => handleSubmit('p1_simple')}
-                            disabled={loading}
-                            className="bg-slate-800 border border-slate-600 hover:bg-emerald-900/30 hover:border-emerald-500/50 p-3 rounded-xl flex flex-col items-center gap-1 disabled:opacity-50 transition-colors"
+                            disabled={loading || (!isGuestP2 && !selectedP2)} // BLOQUEIA
+                            className="bg-slate-800 border border-slate-600 hover:bg-emerald-900/30 hover:border-emerald-500/50 p-3 rounded-xl flex flex-col items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                             <span className="text-xl">🏆</span>
                             <span className="text-xs font-bold text-white line-clamp-1">{isDoubles ? 'TIME 1' : (selectedP1 ? selectedP1.displayName : (guestNameP1 || 'J1'))}</span>
@@ -1480,8 +1490,8 @@ const NewMatch = ({ users, matches, currentUser, isAdmin, onClose, onSuccess, co
 
                         <button 
                             onClick={() => handleSubmit('p2_simple')}
-                            disabled={loading}
-                            className="bg-slate-800 border border-slate-600 hover:bg-emerald-900/30 hover:border-emerald-500/50 p-3 rounded-xl flex flex-col items-center gap-1 disabled:opacity-50 transition-colors"
+                            disabled={loading || (!isGuestP2 && !selectedP2)} // BLOQUEIA
+                            className="bg-slate-800 border border-slate-600 hover:bg-emerald-900/30 hover:border-emerald-500/50 p-3 rounded-xl flex flex-col items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                             <span className="text-xl">🏆</span>
                             <span className="text-xs font-bold text-white line-clamp-1">{isDoubles ? 'TIME 2' : (selectedP2 ? selectedP2.displayName : (guestNameP2 || 'J2'))}</span>
@@ -1749,6 +1759,7 @@ export default function App() {
   }, []);
 
   // --- CARREGAMENTO DE DADOS (COM FILTRO DE TEMPORADA) ---
+  // --- CARREGAMENTO DE DADOS BLINDADO (SUBSTITUA O SEU POR ESTE) ---
   useEffect(() => {
     // 1. Carrega Usuários (Global)
     const unsubUsers = onSnapshot(query(collection(db, getCollectionPath('users'))), (snap) => {
@@ -1762,10 +1773,8 @@ export default function App() {
     const matchesRef = collection(db, getCollectionPath('matches'));
 
     if (currentSeason === 'legacy') {
-        // Se for "Arquivo Morto", baixamos tudo e filtramos quem NÃO tem seasonId
         q = matchesRef; 
     } else {
-        // Se for um Mês específico, usamos query do banco! (Rápido ⚡)
         q = query(matchesRef, where('seasonId', '==', currentSeason));
     }
 
@@ -1781,10 +1790,11 @@ export default function App() {
           }
       });
       
-      // Ordenação manual
+      // --- CORREÇÃO AQUI: ORDENAÇÃO SEGURA ---
+      // Se estiver offline (createdAt é null), usa a hora atual (Date.now())
       list.sort((a, b) => {
-          const dateA = a.createdAt ? a.createdAt.toDate().getTime() : 0;
-          const dateB = b.createdAt ? b.createdAt.toDate().getTime() : 0;
+          const dateA = a.createdAt ? a.createdAt.toDate().getTime() : Date.now();
+          const dateB = b.createdAt ? b.createdAt.toDate().getTime() : Date.now();
           return dateB - dateA;
       });
       
@@ -1792,7 +1802,7 @@ export default function App() {
     });
 
     return () => { unsubUsers(); unsubMatches(); };
-  }, [currentSeason]); // <--- RECARREGA AO MUDAR O MÊS
+  }, [currentSeason]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1832,15 +1842,19 @@ export default function App() {
   const currentUserDoc = user ? usersList.find(u => u.uid === user.uid) : null;
 
   const filteredHistory = matchesList.filter(m => {
-      if (!m.createdAt) return false;
-      const matchDate = m.createdAt.toDate();
+      // CORREÇÃO OFFLINE: Se não tiver createdAt, assume que é de hoje (new Date())
+      const matchDate = m.createdAt ? m.createdAt.toDate() : new Date();
+      
       const dateStr = matchDate.toLocaleDateString('en-CA'); 
       if (historyDate && dateStr !== historyDate) return false;
+      
       if (historySearch) {
           const term = historySearch.toLowerCase();
           const p1 = m.p1Name ? m.p1Name.toLowerCase() : '';
           const p2 = m.p2Name ? m.p2Name.toLowerCase() : '';
-          return p1.includes(term) || p2.includes(term);
+          const p1Partner = m.p1PartnerName ? m.p1PartnerName.toLowerCase() : '';
+          const p2Partner = m.p2PartnerName ? m.p2PartnerName.toLowerCase() : '';
+          return p1.includes(term) || p2.includes(term) || p1Partner.includes(term) || p2Partner.includes(term);
       }
       return true;
   });
@@ -1968,8 +1982,8 @@ export default function App() {
                                 {/* Cabeçalho do Card (Data e Status) */}
                                 <div className="bg-slate-900/50 px-3 py-1.5 flex justify-between items-center border-b border-slate-700/50">
                                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                                        <Clock className="w-3 h-3" />
-                                        {m.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        <Clock className="w-3 h-3" /> 
+                                        {m.createdAt ? m.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '🕒 Enviando...'}
                                         {m.isDoubles && <span className="ml-2 text-blue-400 bg-blue-900/20 px-1.5 rounded border border-blue-500/20">DUPLA</span>}
                                     </span>
                                     
