@@ -220,11 +220,20 @@ const ChristmasLights = () => {
 
 const AvatarDisplay = ({ avatar, size = "md", className = "" }) => {
     const isImage = avatar && (avatar.startsWith('data:image') || avatar.startsWith('http'));
-    const sizeClasses = { sm: "w-8 h-8 text-lg", md: "w-12 h-12 text-2xl", lg: "w-16 h-16 text-4xl", xl: "w-24 h-24 text-6xl" };
+    
+    // CORREÇÃO: Adicionado o "xs" e o "flex-shrink-0" para a imagem nunca amassar
+    const sizeClasses = { 
+        xs: "w-6 h-6 min-w-[1.5rem] text-sm flex-shrink-0", 
+        sm: "w-8 h-8 min-w-[2rem] text-lg flex-shrink-0", 
+        md: "w-12 h-12 min-w-[3rem] text-2xl flex-shrink-0", 
+        lg: "w-16 h-16 min-w-[4rem] text-4xl flex-shrink-0", 
+        xl: "w-24 h-24 min-w-[6rem] text-6xl flex-shrink-0" 
+    };
+    
     const isChristmas = new Date().getMonth() === 11;
 
     return (
-        <div className="relative inline-block">
+        <div className="relative inline-flex items-center justify-center">
             <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center overflow-hidden bg-slate-700 border border-slate-600 ${className} relative z-0`}>
                 {isImage ? (
                     <img src={avatar} alt="Av" className="w-full h-full object-cover" onError={(e) => {e.target.style.display='none'; e.target.parentNode.innerHTML='❌'}} />
@@ -237,9 +246,7 @@ const AvatarDisplay = ({ avatar, size = "md", className = "" }) => {
             {isChristmas && (
                 <svg 
                     viewBox="0 0 100 100" 
-                    // MUDANÇA: -top-5 (sobe mais) e -left-4 (sai mais para o lado) e w-9 (levemente maior)
                     className="absolute -top-5 -right-4 w-9 h-9 z-10 pointer-events-none filter drop-shadow-lg" 
-                    // Mantém o espelhamento para a esquerda
                     style={{ transform: 'scaleX(-1) rotate(-25deg)' }}
                 >
                     {/* Parte Vermelha */}
@@ -486,116 +493,35 @@ const AuthScreen = ({ onCancel, onLoginSuccess }) => {
     } catch (e) { return null; }
   };
 
-  const handleSubmit = async (winType) => {
-    if (!isGuestP1 && !selectedP1) return;
-    if (!isGuestP2 && !selectedP2) return;
-    if (isDoubles && (!selectedP1Partner || !selectedP2Partner)) return alert("Selecione as duplas completas!");
-
+ // --- LÓGICA DE LOGIN CORRETA ---
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
     setLoading(true);
     try {
-      const matchData = { 
-          createdAt: serverTimestamp(), 
-          createdBy: currentUser.uid, 
-          seasonId: currentSeasonId,
-          isChilena: false,
-          isSimpleWin: false,
-          isDoubles: isDoubles
-      };
-
-      // ... (LÓGICA DE NOMES E IDS PERMANECE IGUAL) ...
-      if (isGuestP1) { matchData.p1Name = guestNameP1 || 'Convidado 1'; matchData.p1Id = 'guest_' + Date.now() + '_1'; } 
-      else { matchData.p1Name = selectedP1.displayName; matchData.p1Id = selectedP1.uid; }
-      if (isDoubles && selectedP1Partner) { matchData.p1PartnerName = selectedP1Partner.displayName; matchData.p1PartnerId = selectedP1Partner.uid; }
-
-      if (isGuestP2) { matchData.p2Name = guestNameP2 || 'Convidado 2'; matchData.p2Id = 'guest_' + Date.now() + '_2'; } 
-      else { matchData.p2Name = selectedP2.displayName; matchData.p2Id = selectedP2.uid; }
-      if (isDoubles && selectedP2Partner) { matchData.p2PartnerName = selectedP2Partner.displayName; matchData.p2PartnerId = selectedP2Partner.uid; }
-
-      let s1Final = 0, s2Final = 0;
-
-      // ... (LÓGICA DE PLACAR PERMANECE IGUAL) ...
-      if (winType === 'score') {
-          if (!score1 || !score2) return;
-          s1Final = parseInt(score1);
-          s2Final = parseInt(score2);
-      } else if (winType === 'p1_chilena') {
-          s1Final = 7; s2Final = 0; matchData.isChilena = true;
-      } else if (winType === 'p2_chilena') {
-          s1Final = 0; s2Final = 7; matchData.isChilena = true;
-      } else if (winType === 'p1_simple') {
-          s1Final = 1; s2Final = 0; matchData.isSimpleWin = true; 
-      } else if (winType === 'p2_simple') {
-          s1Final = 0; s2Final = 1; matchData.isSimpleWin = true; 
-      }
-
-      matchData.s1 = s1Final;
-      matchData.s2 = s2Final;
-
-      let newStatus = 'pending_user';
-      let confBy = null;
-      let confAt = null;
-
-      if (isAdmin) {
-          newStatus = 'confirmed'; confBy = 'admin_scribe'; confAt = serverTimestamp();
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
       } else {
-          newStatus = 'pending_guest'; 
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(userCredential.user, { displayName: name });
+        const isAdmin = ADMIN_EMAILS.includes(email);
+        const migratedData = await migrateOfflineUser(userCredential.user.uid, email);
+        await setDoc(doc(db, getCollectionPath('users'), userCredential.user.uid), {
+          uid: userCredential.user.uid, displayName: name, email: email,
+          avatar: migratedData?.avatar || getRandomAvatar(), isOwner: migratedData?.isOwner || false, 
+          fines: migratedData?.fines || 0, 
+          balance: migratedData?.balance || 0,
+          role: isAdmin ? 'admin' : 'user', createdAt: serverTimestamp()
+        });
+        if (migratedData) alert(`Bem-vindo(a) ${name}! Histórico recuperado.`);
       }
-
-      matchData.status = newStatus;
-      if(confBy) matchData.confirmedBy = confBy;
-      if(confAt) matchData.confirmedAt = confAt;
-      
-      const docRef = await addDoc(collection(db, getCollectionPath('matches')), matchData);
-      
-      if (matchData.isChilena) triggerChilenaEffect();
-      else triggerWinConfetti();
-
-      // --- 👠 ZOEIRA DO "PERDEU DE 4" (NOVA LÓGICA AQUI) ---
-      // Só executa se não for chilena (chilena é 7x0) e tiver placar real
-      if (!matchData.isChilena && !matchData.isSimpleWin) {
-          const p1Won = s1Final > s2Final;
-          const loserScore = p1Won ? s2Final : s1Final;
-          const loserName = p1Won ? (matchData.p2Name) : (matchData.p1Name);
-          
-          if (loserScore === 4) {
-              // Toca um alerta humilhante
-              alert(`👠 IHHH! ${loserName} PERDEU DE 4!\n\n🤣 VIROU PUTA! 🤣`);
-          }
-      }
-
-      // --- LÓGICA DO REI DA MESA ---
-      if (isKingMode && newStatus === 'confirmed') {
-          const p1Won = s1Final > s2Final;
-          if (!p1Won) {
-              if (isGuestP2) {
-                  setIsGuestP1(true);
-                  setGuestNameP1(guestNameP2);
-                  setSelectedP1(null);
-                  setSelectedP1Partner(null);
-              } else {
-                  setIsGuestP1(false);
-                  setSelectedP1(selectedP2);
-                  if (isDoubles) setSelectedP1Partner(selectedP2Partner);
-              }
-          }
-          setIsGuestP2(false);
-          setGuestNameP2('');
-          setSelectedP2(null);
-          setSelectedP2Partner(null);
-          setScore1('');
-          setScore2('');
-          setLoading(false);
-          if(!((!matchData.isChilena && !matchData.isSimpleWin) && ((p1Won ? s2Final : s1Final) === 4))) {
-             // Só mostra o alerta do Rei se não mostrou o da Puta (pra não ter 2 alerts seguidos)
-             alert('👑 Vencedores continuam! Quem são os próximos desafiantes?');
-          }
-      } else {
-          onSuccess(docRef.id, matchData.status);
-      }
-
-    } catch (err) { alert('Erro: ' + err.message); setLoading(false); }
+      if(onLoginSuccess) onLoginSuccess();
+    } catch (err) { 
+      setError(err.message); 
+    } finally { 
+      setLoading(false); 
+    }
   };
-
   const handleResetPassword = async (e) => {
     e.preventDefault();
     if (!email) { setError("Digite seu e-mail primeiro."); return; }
@@ -1746,8 +1672,7 @@ export default function App() {
   const [transactionModal, setTransactionModal] = useState(null); 
   const [selectedPlayerStats, setSelectedPlayerStats] = useState(null);
 
-  // --- CONTROLE DE TEMPORADAS ---
-  const [currentSeason, setCurrentSeason] = useState(getCurrentSeasonId()); // Padrão: Mês Atual
+  const [currentSeason, setCurrentSeason] = useState(getCurrentSeasonId());
 
   useEffect(() => {
     const unsubConfig = onSnapshot(doc(db, getCollectionPath('settings'), 'global'), (doc) => {
@@ -1758,17 +1683,18 @@ export default function App() {
     return () => unsubConfig();
   }, []);
 
-  // --- CARREGAMENTO DE DADOS (COM FILTRO DE TEMPORADA) ---
-  // --- CARREGAMENTO DE DADOS BLINDADO (SUBSTITUA O SEU POR ESTE) ---
+  // --- CARREGAMENTO DE DADOS (BLINDADO E SEGURO) ---
   useEffect(() => {
-    // 1. Carrega Usuários (Global)
+    // PROTEÇÃO CRÍTICA: Se não houver usuário, NÃO tenta ler o banco.
+    // Isso evita que o Firebase Offline tome bloqueio de permissão e "trave" a conta.
+    if (!user) return;
+
     const unsubUsers = onSnapshot(query(collection(db, getCollectionPath('users'))), (snap) => {
       const list = []; 
       snap.forEach(doc => list.push(doc.data())); 
       setUsersList(list);
     });
 
-    // 2. Carrega Partidas da Temporada Selecionada
     let q;
     const matchesRef = collection(db, getCollectionPath('matches'));
 
@@ -1782,7 +1708,6 @@ export default function App() {
       const list = []; 
       snap.forEach(doc => {
           const data = doc.data();
-          // Filtro extra no lado do cliente para o Legado
           if (currentSeason === 'legacy') {
               if (!data.seasonId) list.push({ id: doc.id, ...data });
           } else {
@@ -1790,8 +1715,6 @@ export default function App() {
           }
       });
       
-      // --- CORREÇÃO AQUI: ORDENAÇÃO SEGURA ---
-      // Se estiver offline (createdAt é null), usa a hora atual (Date.now())
       list.sort((a, b) => {
           const dateA = a.createdAt ? a.createdAt.toDate().getTime() : Date.now();
           const dateB = b.createdAt ? b.createdAt.toDate().getTime() : Date.now();
@@ -1802,7 +1725,7 @@ export default function App() {
     });
 
     return () => { unsubUsers(); unsubMatches(); };
-  }, [currentSeason]);
+  }, [currentSeason, user]); // A dependência 'user' garante que os dados recarreguem ao logar
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1831,6 +1754,17 @@ export default function App() {
       setTransactionModal({ user: userTarget, action });
   };
 
+  // --- FUNÇÃO DE LOGOUT (RESET TOTAL) ---
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      // F5 Automático: Limpa a memória do React e reseta o cache bugado do Firebase!
+      window.location.reload(); 
+    } catch (error) {
+      alert("Erro ao sair: " + error.message);
+    }
+  };
+
   if (loading) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-emerald-400">Carregando...</div>;
   if (confirmMatchId) return <div className="min-h-screen bg-slate-900 text-slate-100 relative z-10"><ChristmasSnow /><ChristmasLights /><ConfirmMatchScreen matchId={confirmMatchId} currentUser={user} onComplete={clearUrl}/></div>;
    
@@ -1842,9 +1776,7 @@ export default function App() {
   const currentUserDoc = user ? usersList.find(u => u.uid === user.uid) : null;
 
   const filteredHistory = matchesList.filter(m => {
-      // CORREÇÃO OFFLINE: Se não tiver createdAt, assume que é de hoje (new Date())
       const matchDate = m.createdAt ? m.createdAt.toDate() : new Date();
-      
       const dateStr = matchDate.toLocaleDateString('en-CA'); 
       if (historyDate && dateStr !== historyDate) return false;
       
@@ -1884,7 +1816,8 @@ export default function App() {
             {user ? (
                 <>
                     <button onClick={() => setShowProfile(true)} className="hover:scale-110 transition-transform"><AvatarDisplay avatar={currentUserDoc?.avatar} size="sm" /></button>
-                    <button onClick={() => signOut(auth)} className="text-slate-400 hover:text-white"><LogOut className="w-5 h-5" /></button>
+                    {/* Botão Sair Mobile Atualizado */}
+                    <button onClick={handleLogout} className="text-slate-400 hover:text-white"><LogOut className="w-5 h-5" /></button>
                 </>
             ) : (
                 <button onClick={() => setView('auth')} className="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1"><LogIn className="w-3 h-3" /> Entrar</button>
@@ -1905,7 +1838,8 @@ export default function App() {
                 {user ? (
                     <>
                         <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 bg-slate-800 px-3 py-2 rounded-lg hover:bg-slate-700"><AvatarDisplay avatar={currentUserDoc?.avatar} size="sm" /><span className="font-bold text-sm">{currentUserDoc?.displayName}</span></button>
-                        <button onClick={() => signOut(auth)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"><LogOut className="w-4 h-4" /> Sair</button>
+                        {/* Botão Sair Desktop Atualizado */}
+                        <button onClick={handleLogout} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"><LogOut className="w-4 h-4" /> Sair</button>
                     </>
                 ) : (
                     <button onClick={() => setView('auth')} className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-emerald-500">Fazer Login</button>
@@ -1973,13 +1907,10 @@ export default function App() {
                     </div>
                 ) : (
                     filteredHistory.map(m => {
-                        // Helpers para identificar vencedor
                         const p1Won = m.s1 > m.s2;
-                        const isDraw = m.s1 === m.s2; // Raro, mas possível em testes
 
                         return (
                             <div key={m.id} className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-sm relative">
-                                {/* Cabeçalho do Card (Data e Status) */}
                                 <div className="bg-slate-900/50 px-3 py-1.5 flex justify-between items-center border-b border-slate-700/50">
                                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
                                         <Clock className="w-3 h-3" /> 
@@ -1987,7 +1918,6 @@ export default function App() {
                                         {m.isDoubles && <span className="ml-2 text-blue-400 bg-blue-900/20 px-1.5 rounded border border-blue-500/20">DUPLA</span>}
                                     </span>
                                     
-                                    {/* Status da Partida */}
                                     {m.status === 'confirmed' ? (
                                         <div className="flex items-center gap-1 text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full">
                                             <CheckCircle className="w-3 h-3" /> Confirmado
@@ -1999,8 +1929,6 @@ export default function App() {
                                     )}
                                 </div>
 
-                                {/* Corpo do Placar */}
-                                {/* Corpo do Placar */}
                                 <div className="p-3 flex flex-col gap-2">
                                     
                                     {/* LINHA TIME 1 */}
@@ -2016,7 +1944,6 @@ export default function App() {
                                             )}
                                         </div>
                                         <div className="text-right flex items-center gap-2">
-                                            {/* ETIQUETA DA VERGONHA J1 */}
                                             {!p1Won && m.s1 === 4 && !m.isSimpleWin && (
                                                 <span className="text-[8px] font-black text-pink-500 border border-pink-500/50 px-1 rounded bg-pink-500/10 transform -rotate-6">
                                                     👠 PUTA
@@ -2044,7 +1971,6 @@ export default function App() {
                                             )}
                                         </div>
                                         <div className="text-right flex items-center gap-2">
-                                            {/* ETIQUETA DA VERGONHA J2 */}
                                             {p1Won && m.s2 === 4 && !m.isSimpleWin && (
                                                 <span className="text-[8px] font-black text-pink-500 border border-pink-500/50 px-1 rounded bg-pink-500/10 transform -rotate-6">
                                                     👠 PUTA
@@ -2058,11 +1984,9 @@ export default function App() {
                                             )}
                                         </div>
                                     </div>
-
                                 </div>
 
                                 {/* Rodapé (Ações) */}
-                               {/* Rodapé (Ações) */}
                                 {(m.isChilena || (user && (m.status !== 'confirmed' || isAdmin))) && (
                                     <div className="px-3 pb-3 pt-0 flex justify-between items-center">
                                         <div>
@@ -2073,29 +1997,24 @@ export default function App() {
                                             )}
                                         </div>
                                         
-                                        {/* Botões de Ação */}
                                         {(m.status !== 'confirmed' || isAdmin) && user && (
                                             <div className="flex gap-2">
-                                                {/* QR Code (Apenas criador vê) */}
                                                 {m.createdBy === user.uid && m.p2Id.startsWith('guest_') && (
                                                     <button onClick={() => setPendingConfirmationMatchId(m.id)} className="p-1.5 bg-slate-700 text-white rounded hover:bg-slate-600"><QrCode className="w-4 h-4" /></button>
                                                 )}
                                                 
-                                                {/* Botão Cancelar (Criador) - SÓ APARECE SE NÃO FOR ADMIN (pra não duplicar) */}
                                                 {m.createdBy === user.uid && !isAdmin && (
                                                     <button onClick={() => handleDeleteMatch(m.id)} className="p-1.5 bg-red-900/30 text-red-400 rounded hover:bg-red-900/50" title="Cancelar">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 )}
 
-                                                {/* Botão Confirmar (Jogador 2) */}
                                                 {m.p2Id === user.uid && (
                                                     <button onClick={() => handleP2Confirm(m.id)} className="p-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-500" title="Confirmar">
                                                         <Check className="w-4 h-4" />
                                                     </button>
                                                 )}
 
-                                                {/* Botões de Admin (Validar e Excluir) */}
                                                 {isAdmin && (
                                                     <>
                                                         {m.status !== 'confirmed' && (
